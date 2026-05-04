@@ -1,0 +1,28 @@
+{
+  "name": "Sled",
+  "tagline": "Talk to your coding agent from anywhere",
+  "slug": "sled",
+  "description": "Sled lets developers interact with their local coding agent using voice, so work can continue even when away from the desk.",
+  "links": {
+    "website": "https://sled.dev",
+    "demo": "https://sled.dev/demo",
+    "video": "https://loom.com/share/abcd1234",
+    "github": "https://github.com/sled/sled"
+  },
+  "thumbnail": "https://cdn.example.com/images/sled-thumb.png",
+  "gallery": [
+    "https://cdn.example.com/images/sled-1.png",
+    "https://cdn.example.com/images/sled-2.png"
+  ],
+  "firstComment": "We built Sled because we kept losing momentum whenever we stepped away from our desks. Would love feedback from the community!",
+  "makers": [
+    "696da807cf935fafb97a9866"
+  ],
+  "topics": [
+    "696da28b80f6672e79ee3234"
+  ],
+  "pricingType": "freemium",
+  "isOpenSource": true,
+  "isAiProduct": true,
+  "scheduledLaunchDate": "2026-02-01T00:00:00.000Z"
+}
