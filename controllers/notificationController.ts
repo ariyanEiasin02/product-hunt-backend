@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import mongoose from "mongoose";
-import Notification, { NotificationType } from "../models/notificationSchema.js";
+import Notification, { NotificationType, INotification } from "../models/notificationSchema.js";
 import User from "../models/userSchema.js";
 import { AuthRequest } from "../middleware/authMiddleware.js";
 import { emitNotification, emitUnreadCount } from "../config/socket.js";
@@ -18,7 +18,7 @@ export async function createNotification(payload: {
   try {
     // Never notify yourself
     if (payload.recipient === payload.actor) return;
-    const note = await Notification.create(payload);
+    const note = await Notification.create(payload) as mongoose.Document & INotification;
 
     // Populate actor for the real-time event
     await note.populate("actor", "fullname username profileImage");
@@ -77,7 +77,7 @@ export async function createNotificationController(
       entityId: entityId && mongoose.Types.ObjectId.isValid(entityId) ? entityId : undefined,
       entityType: entityType || undefined,
       link: link || "",
-    });
+    }) as mongoose.Document & INotification;
 
     await note.populate("actor", "fullname username profileImage");
     res.status(201).json({ success: true, data: note });
@@ -249,7 +249,7 @@ export async function upsertNotification(payload: {
         },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
+    ) as mongoose.Document & INotification | null;
 
     const note = existing || (await Notification.findOne({
       recipient: payload.recipient,
