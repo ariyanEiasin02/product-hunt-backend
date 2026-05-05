@@ -12,7 +12,7 @@ export async function createNotification(payload: {
   type: NotificationType;
   message: string;
   entityId?: string;
-  entityType?: string;
+  entityType?: INotification["entityType"];
   link?: string;
 }): Promise<void> {
   try {
@@ -226,7 +226,7 @@ export async function upsertNotification(payload: {
   type: NotificationType;
   message: string;
   entityId?: string;
-  entityType?: string;
+  entityType?: INotification["entityType"];
   link?: string;
 }): Promise<void> {
   try {

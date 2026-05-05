@@ -27,9 +27,9 @@ const NotificationSchema = new Schema<INotification>(
   {
     recipient: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     actor:     { type: Schema.Types.ObjectId, ref: "User", required: true },
-    type:      { type: String, required: true },
+    type:      { type: String, required: true, enum: ["follow","unfollow","upvote_product","upvote_comment","upvote_review","comment","reply","review"] },
     entityId:  { type: Schema.Types.ObjectId },
-    entityType:{ type: String },
+    entityType:{ type: String, enum: ["product","comment","review","user"] },
     message:   { type: String, default: "" },
     read:      { type: Boolean, default: false, index: true },
     link:      { type: String, default: "" },

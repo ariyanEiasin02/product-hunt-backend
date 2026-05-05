@@ -1,5 +1,6 @@
 import { Server as HttpServer } from "http";
 import { Server, Socket } from "socket.io";
+import { NotificationType } from "../models/notificationSchema.js";
 import jwt from "jsonwebtoken";
 
 let io: Server | null = null;
@@ -88,11 +89,11 @@ export function emitNotification(
   recipientId: string,
   payload: {
     _id: string;
-    type: string;
+    type: NotificationType;
     message: string;
     actor: { _id: string; fullname: string; username: string; profileImage?: string };
     entityId?: string;
-    entityType?: string;
+    entityType?: "product" | "comment" | "review" | "user";
     link?: string;
     read: boolean;
     createdAt: string;
