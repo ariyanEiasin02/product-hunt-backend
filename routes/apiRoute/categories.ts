@@ -13,6 +13,7 @@ import {
   allGetCategoriesController,
   getCategoryBySlugController,
   getApprovedSubcategoriesController,
+  getNavbarCategoriesController,
 } from "../../controllers/categoryController.js";
 import { isAdmin, verifyToken, optionalAuth } from "../../middleware/authMiddleware.js";
 import { uploadImage } from "../../config/multer.js";
@@ -33,6 +34,7 @@ router.delete("/subcategoryDelete/:id", verifyToken, isAdmin, subcategoryDeleteC
 
 // all category and subcategory routes will be here
 router.get("/allCategories", allGetCategoriesController);
+router.get("/allNavCategories", getNavbarCategoriesController);
 
 // Get approved subcategories for product submission (topic selection)
 router.get("/approvedSubcategories", getApprovedSubcategoriesController);

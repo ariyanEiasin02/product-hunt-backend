@@ -337,6 +337,26 @@ export async function  allGetCategoriesController(
     res.status(500).json({ success: false, message: errorMessage });
   }
 }
+// get navbar categories and subcategories for the frontend
+export async function getNavbarCategoriesController(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const categories = await Category.find({ status: "approved" }).populate({
+      path: "subcategories",
+      match: { status: "approved" },
+    }).limit(3);
+    res.status(200).json({
+      success: true,
+      message: "Approved categories fetched successfully",
+      data: categories,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Server error";
+    res.status(500).json({ success: false, message: errorMessage });
+  }
+}
 
 // Get category detail by slug with products
 export async function getCategoryBySlugController(
