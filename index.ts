@@ -61,8 +61,11 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Serve static files from uploads directory
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// Serve static files from the workspace uploads directory.
+// Use process.cwd() so this works both in TS dev mode and compiled dist mode.
+const uploadsPath = path.resolve(process.cwd(), "uploads");
+app.use("/uploads", express.static(uploadsPath));
+app.use("/api/uploads", express.static(uploadsPath));
 
 // Use routes
 app.use(router);
