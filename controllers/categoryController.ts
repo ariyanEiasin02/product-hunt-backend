@@ -64,7 +64,7 @@ export async function getCategoriesController(
 ): Promise<void> {
   try {
     const page  = Math.max(1, parseInt(String(req.query.page  ?? 1), 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? 20), 10) || 20));
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? 24), 10) || 20));
     const skip  = (page - 1) * limit;
 
     const [categories, total] = await Promise.all([
