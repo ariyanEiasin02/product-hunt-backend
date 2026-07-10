@@ -5,7 +5,7 @@ import mongoose from "mongoose";
 import Product from "../models/productSchema.js";
 import Subcategory from "../models/subcategorySchema.js";
 import User from "../models/userSchema.js";
-import { createFileUrl, createFileUrlFromPath, extractFileInfo } from "../utils/fileUploadHelper.js";
+import { uploadToCloudinary, uploadMultipleToCloudinary, deleteByUrl } from "../utils/uploadToCloudinary.js";
 import { createNotification, upsertNotification, removeNotificationIfExists } from "./notificationController.js";
 
 export async function createProductController(
@@ -44,18 +44,25 @@ export async function createProductController(
       topics = topics.includes(',') ? topics.split(',').map(id => id.trim()) : [topics];
     }
 
-    // Handle file uploads (thumbnail and gallery)
+    // Handle file uploads (thumbnail and gallery) — uploaded to Cloudinary
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     let thumbnail = req.body.thumbnail; // URL from body (if not uploading)
     let gallery = req.body.gallery ? JSON.parse(req.body.gallery) : []; // URLs from body
 
-    // If files were uploaded, use those URLs instead
+    // Upload thumbnail to Cloudinary if a file was provided
     if (files?.thumbnail && files.thumbnail[0]) {
-      thumbnail = createFileUrlFromPath(files.thumbnail[0].path);
+      const thumbResult = await uploadToCloudinary(files.thumbnail[0].buffer, {
+        folder: "products/thumbnails",
+      });
+      thumbnail = thumbResult.secure_url;
     }
 
+    // Upload gallery images to Cloudinary if provided
     if (files?.gallery && files.gallery.length > 0) {
-      gallery = files.gallery.map(file => createFileUrlFromPath(file.path));
+      const galleryResults = await uploadMultipleToCloudinary(files.gallery, {
+        folder: "products/gallery",
+      });
+      gallery = galleryResults.map((r) => r.secure_url);
     }
 
     // Validate required fields
@@ -216,6 +223,7 @@ export async function createProductController(
 
     // Handle other errors
     const errorMessage = error instanceof Error ? error.message : "Server error";
+    console.error("[createProductController] Error:", error);
     res.status(500).json({
       success: false,
       message: errorMessage,
@@ -1030,22 +1038,34 @@ export async function updateProductController(
       topics = product.topics; // Keep existing
     }
 
-    // Handle file uploads (thumbnail and gallery)
+    // Handle file uploads (thumbnail and gallery) — uploaded to Cloudinary
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     let thumbnail = req.body.thumbnail;
     let gallery = req.body.gallery ? JSON.parse(req.body.gallery) : undefined;
     let existingGallery = req.body.existingGallery ? JSON.parse(req.body.existingGallery) : [];
 
-    // If files were uploaded, use those URLs instead
+    // Upload new thumbnail to Cloudinary
     if (files?.thumbnail && files.thumbnail[0]) {
-      thumbnail = createFileUrlFromPath(files.thumbnail[0].path);
+      // Delete old thumbnail if it was on Cloudinary
+      if (product.thumbnail?.includes("res.cloudinary.com")) {
+        deleteByUrl(product.thumbnail).catch((err) =>
+          console.warn("[Cloudinary] Failed to delete old thumbnail:", err)
+        );
+      }
+      const thumbResult = await uploadToCloudinary(files.thumbnail[0].buffer, {
+        folder: "products/thumbnails",
+      });
+      thumbnail = thumbResult.secure_url;
     } else if (thumbnail === undefined) {
       thumbnail = product.thumbnail; // Keep existing
     }
 
     // Handle gallery: merge existing URLs with new uploaded files
     if (files?.gallery && files.gallery.length > 0) {
-      const newGalleryUrls = files.gallery.map(file => createFileUrlFromPath(file.path));
+      const galleryResults = await uploadMultipleToCloudinary(files.gallery, {
+        folder: "products/gallery",
+      });
+      const newGalleryUrls = galleryResults.map((r) => r.secure_url);
       // Merge existing gallery URLs with new uploads
       gallery = [...existingGallery, ...newGalleryUrls];
     } else if (existingGallery.length > 0) {
@@ -1118,6 +1138,7 @@ export async function updateProductController(
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Server error";
+    console.error("[updateProductController] Error:", error);
     res.status(500).json({
       success: false,
       message: errorMessage,

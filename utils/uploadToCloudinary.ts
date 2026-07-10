@@ -85,6 +85,7 @@ export function uploadToCloudinary(
       uploadOptions,
       (error, result) => {
         if (error) {
+          console.error("[Cloudinary upload_stream] Upload failed:", error);
           reject(error);
           return;
         }
@@ -229,11 +230,11 @@ export async function uploadMultipleToCloudinary(
   files: Express.Multer.File[],
   options: UploadToCloudinaryOptions = {}
 ): Promise<CloudinaryUploadResult[]> {
+  // NOTE: We intentionally do NOT pass useFilename here.
+  // Cloudinary auto-generates a unique public_id for every upload,
+  // ensuring no images overwrite each other.
   const uploads = files.map((file) =>
-    uploadToCloudinary(file.buffer, {
-      ...options,
-      useFilename: true,
-    })
+    uploadToCloudinary(file.buffer, options)
   );
 
   return Promise.all(uploads);
