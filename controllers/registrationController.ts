@@ -393,7 +393,7 @@ async function updateProfileController(req: AuthRequest, res: Response): Promise
 }
 
 // ============================================
-// UPDATE AVATAR — PUT /api/authentication/update-avatar
+// UPDATE AVATAR (disk storage) — PUT /api/authentication/update-avatar
 // ============================================
 async function updateAvatarController(req: AuthRequest, res: Response): Promise<void> {
     try {
@@ -425,6 +425,63 @@ async function updateAvatarController(req: AuthRequest, res: Response): Promise<
             message: "Avatar updated successfully",
             data: {
                 profileImage: user.profileImage,
+            },
+        });
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        res.status(500).json({ success: false, message: errorMessage });
+    }
+}
+
+// ============================================
+// UPDATE AVATAR (Cloudinary) — PUT /api/authentication/update-avatar/cloudinary
+// ============================================
+async function updateAvatarCloudinaryController(req: AuthRequest, res: Response): Promise<void> {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            res.status(401).json({ success: false, message: "Unauthorized" });
+            return;
+        }
+
+        const file = req.file;
+        if (!file) {
+            res.status(400).json({ success: false, message: "No image file provided" });
+            return;
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            res.status(404).json({ success: false, message: "User not found" });
+            return;
+        }
+
+        // Import Cloudinary utilities once
+        const { uploadToCloudinary, deleteByUrl } = await import("../utils/uploadToCloudinary.js");
+
+        // Delete old Cloudinary avatar if it exists
+        const oldProfileImage = user.profileImage;
+        if (oldProfileImage && oldProfileImage.includes("res.cloudinary.com")) {
+            deleteByUrl(oldProfileImage).catch((err) =>
+                console.warn("[Cloudinary] Failed to delete old avatar:", err)
+            );
+        }
+
+        // Upload new avatar to Cloudinary
+        const result = await uploadToCloudinary(file.buffer, {
+            folder: `users/${userId}/avatar`,
+            useFilename: true,
+        });
+
+        user.profileImage = result.secure_url;
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Avatar updated successfully",
+            data: {
+                profileImage: user.profileImage,
+                publicId: result.public_id,
             },
         });
     } catch (error) {
@@ -584,6 +641,7 @@ export {
     getCurrentUserController,
     updateProfileController,
     updateAvatarController,
+    updateAvatarCloudinaryController,
     changePasswordController,
     forgotPasswordController,
     resetPasswordController,
