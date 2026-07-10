@@ -16,15 +16,15 @@ import {
   updateProductCloudinaryController
 } from "../../controllers/productController.js";
 import { isAdmin, verifyToken, optionalAuth } from "../../middleware/authMiddleware.js";
-import { uploadProductMedia, uploadProductMediaMemory } from "../../config/multer.js";
+import { uploadProductMediaMemory } from "../../config/multer.js";
 import { handleMulterError } from "../../middleware/uploadMiddleware.js";
 
 const router = Router();
 
-// Create new product submission (with file upload support)
+// Create new product submission (uploads to Cloudinary via memory storage)
 router.post(
   "/",
-  uploadProductMedia.fields([
+  uploadProductMediaMemory.fields([
     { name: "thumbnail", maxCount: 1 },
     { name: "gallery", maxCount: 10 },
   ]),
@@ -32,12 +32,12 @@ router.post(
   createProductController
 );
 
-// Update product (Admin only)
+// Update product (Admin only) — uploads to Cloudinary via memory storage
 router.put(
   "/:id",
   verifyToken,
   isAdmin,
-  uploadProductMedia.fields([
+  uploadProductMediaMemory.fields([
     { name: "thumbnail", maxCount: 1 },
     { name: "gallery", maxCount: 10 },
   ]),

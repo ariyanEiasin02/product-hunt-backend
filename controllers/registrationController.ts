@@ -468,9 +468,10 @@ async function updateAvatarCloudinaryController(req: AuthRequest, res: Response)
         }
 
         // Upload new avatar to Cloudinary
+        // NOTE: No useFilename — Cloudinary auto-generates a unique public_id
+        // so every upload creates a brand new image without overwriting.
         const result = await uploadToCloudinary(file.buffer, {
             folder: `users/${userId}/avatar`,
-            useFilename: true,
         });
 
         user.profileImage = result.secure_url;

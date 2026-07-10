@@ -277,7 +277,6 @@ export async function uploadSingleImageCloudinaryController(
 
     const result = await uploadToCloudinary(buffer, {
       folder: "uploads/images",
-      useFilename: true,
     });
 
     res.status(200).json({
@@ -379,7 +378,6 @@ export async function uploadProductMediaCloudinaryController(
     if (files.thumbnail?.[0]) {
       const thumbResult = await uploadToCloudinary(files.thumbnail[0].buffer, {
         folder: "uploads/products/thumbnails",
-        useFilename: true,
       });
       result.thumbnail = {
         url: thumbResult.secure_url,
@@ -457,7 +455,6 @@ export async function uploadAvatarCloudinaryController(
 
     const result = await uploadToCloudinary(req.file.buffer, {
       folder: `users/${userId}/avatar`,
-      useFilename: true,
     });
 
     res.status(200).json({

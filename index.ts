@@ -8,6 +8,7 @@ import connectDB from "./config/db.js";
 import router from "./routes/index.js";
 import { createUploadDirectories } from "./utils/fileUploadHelper.js";
 import { initSocketIO } from "./config/socket.js";
+import { initCloudinary } from "./config/cloudinary.js";
 
 // Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -15,6 +16,9 @@ const __dirname = path.dirname(__filename);
 
 // Load environment variables
 dotenv.config();
+
+// Initialize Cloudinary with credentials from .env
+initCloudinary();
 
 // Connect to MongoDB
 connectDB();
