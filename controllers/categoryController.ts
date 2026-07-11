@@ -354,11 +354,11 @@ export async function getNavbarCategoriesController(
   res: Response
 ): Promise<void> {
   try {
-    const categories = await Category.find({ status: "approved" }).limit(10).populate({
+    const categories = await Category.find({ status: "approved" }).limit(8).populate({
       path: "subcategories",
       match: { status: "approved" },
        options: {
-      limit: 8,
+      limit: 10,
     },
     });
     res.status(200).json({
