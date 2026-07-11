@@ -5,7 +5,7 @@ import mongoose from "mongoose";
 import Product from "../models/productSchema.js";
 import Subcategory from "../models/subcategorySchema.js";
 import User from "../models/userSchema.js";
-import { createFileUrl, createFileUrlFromPath, extractFileInfo } from "../utils/fileUploadHelper.js";
+import { uploadToCloudinary, uploadMultipleToCloudinary, deleteByUrl } from "../utils/uploadToCloudinary.js";
 import { createNotification, upsertNotification, removeNotificationIfExists } from "./notificationController.js";
 
 export async function createProductController(
@@ -44,18 +44,25 @@ export async function createProductController(
       topics = topics.includes(',') ? topics.split(',').map(id => id.trim()) : [topics];
     }
 
-    // Handle file uploads (thumbnail and gallery)
+    // Handle file uploads (thumbnail and gallery) — uploaded to Cloudinary
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     let thumbnail = req.body.thumbnail; // URL from body (if not uploading)
     let gallery = req.body.gallery ? JSON.parse(req.body.gallery) : []; // URLs from body
 
-    // If files were uploaded, use those URLs instead
+    // Upload thumbnail to Cloudinary if a file was provided
     if (files?.thumbnail && files.thumbnail[0]) {
-      thumbnail = createFileUrlFromPath(files.thumbnail[0].path);
+      const thumbResult = await uploadToCloudinary(files.thumbnail[0].buffer, {
+        folder: "products/thumbnails",
+      });
+      thumbnail = thumbResult.secure_url;
     }
 
+    // Upload gallery images to Cloudinary if provided
     if (files?.gallery && files.gallery.length > 0) {
-      gallery = files.gallery.map(file => createFileUrlFromPath(file.path));
+      const galleryResults = await uploadMultipleToCloudinary(files.gallery, {
+        folder: "products/gallery",
+      });
+      gallery = galleryResults.map((r) => r.secure_url);
     }
 
     // Validate required fields
@@ -216,6 +223,7 @@ export async function createProductController(
 
     // Handle other errors
     const errorMessage = error instanceof Error ? error.message : "Server error";
+    console.error("[createProductController] Error:", error);
     res.status(500).json({
       success: false,
       message: errorMessage,
@@ -1030,22 +1038,34 @@ export async function updateProductController(
       topics = product.topics; // Keep existing
     }
 
-    // Handle file uploads (thumbnail and gallery)
+    // Handle file uploads (thumbnail and gallery) — uploaded to Cloudinary
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     let thumbnail = req.body.thumbnail;
     let gallery = req.body.gallery ? JSON.parse(req.body.gallery) : undefined;
     let existingGallery = req.body.existingGallery ? JSON.parse(req.body.existingGallery) : [];
 
-    // If files were uploaded, use those URLs instead
+    // Upload new thumbnail to Cloudinary
     if (files?.thumbnail && files.thumbnail[0]) {
-      thumbnail = createFileUrlFromPath(files.thumbnail[0].path);
+      // Delete old thumbnail if it was on Cloudinary
+      if (product.thumbnail?.includes("res.cloudinary.com")) {
+        deleteByUrl(product.thumbnail).catch((err) =>
+          console.warn("[Cloudinary] Failed to delete old thumbnail:", err)
+        );
+      }
+      const thumbResult = await uploadToCloudinary(files.thumbnail[0].buffer, {
+        folder: "products/thumbnails",
+      });
+      thumbnail = thumbResult.secure_url;
     } else if (thumbnail === undefined) {
       thumbnail = product.thumbnail; // Keep existing
     }
 
     // Handle gallery: merge existing URLs with new uploaded files
     if (files?.gallery && files.gallery.length > 0) {
-      const newGalleryUrls = files.gallery.map(file => createFileUrlFromPath(file.path));
+      const galleryResults = await uploadMultipleToCloudinary(files.gallery, {
+        folder: "products/gallery",
+      });
+      const newGalleryUrls = galleryResults.map((r) => r.secure_url);
       // Merge existing gallery URLs with new uploads
       gallery = [...existingGallery, ...newGalleryUrls];
     } else if (existingGallery.length > 0) {
@@ -1118,10 +1138,365 @@ export async function updateProductController(
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Server error";
+    console.error("[updateProductController] Error:", error);
     res.status(500).json({
       success: false,
       message: errorMessage,
     });
+  }
+}
+
+// ========================================================================
+// CLOUDINARY-BASED PRODUCT CONTROLLERS
+// These use memory storage (req.file.buffer) and upload to Cloudinary.
+// ========================================================================
+
+/**
+ * Create a product with Cloudinary media uploads
+ * POST /api/products/cloudinary
+ */
+export async function createProductCloudinaryController(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    let {
+      name,
+      tagline,
+      slug,
+      description,
+      links,
+      firstComment,
+      makers,
+      topics,
+      pricingType,
+      isOpenSource,
+      isAiProduct,
+      scheduledLaunchDate,
+    } = req.body;
+
+    // Handle form-data dot notation (links.website, links.appStore, etc.)
+    if (!links && req.body['links.website']) {
+      links = {
+        website: req.body['links.website']
+      };
+    }
+
+    // Handle makers and topics - convert strings to arrays if needed
+    if (typeof makers === 'string') {
+      makers = makers.includes(',') ? makers.split(',').map(id => id.trim()) : [makers];
+    }
+    if (typeof topics === 'string') {
+      topics = topics.includes(',') ? topics.split(',').map(id => id.trim()) : [topics];
+    }
+
+    // Handle file uploads (thumbnail and gallery) — Cloudinary
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+    let thumbnail = req.body.thumbnail;
+    let gallery: string[] = req.body.gallery ? JSON.parse(req.body.gallery) : [];
+
+    const {
+      uploadToCloudinary,
+      uploadMultipleToCloudinary,
+    } = await import("../utils/uploadToCloudinary.js");
+
+    // Upload thumbnail to Cloudinary if a file was provided
+    if (files?.thumbnail && files.thumbnail[0]) {
+      const thumbResult = await uploadToCloudinary(files.thumbnail[0].buffer, {
+        folder: "products/thumbnails",
+      });
+      thumbnail = thumbResult.secure_url;
+    }
+
+    // Upload gallery images to Cloudinary if provided
+    if (files?.gallery && files.gallery.length > 0) {
+      const galleryResults = await uploadMultipleToCloudinary(files.gallery, {
+        folder: "products/gallery",
+      });
+      gallery = galleryResults.map((r) => r.secure_url);
+    }
+
+    // Validate required fields
+    if (!name || !tagline || !description || !links?.website) {
+      res.status(400).json({
+        success: false,
+        message: `Missing required fields: name, tagline, description, and website link are required`,
+      });
+      return;
+    }
+
+    if (!thumbnail) {
+      res.status(400).json({
+        success: false,
+        message: "Thumbnail is required (either upload a file or provide a URL)",
+      });
+      return;
+    }
+
+    if (!makers || !Array.isArray(makers) || makers.length === 0) {
+      res.status(400).json({
+        success: false,
+        message: "At least one maker is required",
+      });
+      return;
+    }
+
+    if (!topics || !Array.isArray(topics) || topics.length === 0) {
+      res.status(400).json({
+        success: false,
+        message: "At least one category is required",
+      });
+      return;
+    }
+
+    if (topics.length > 3) {
+      res.status(400).json({
+        success: false,
+        message: "Maximum 3 categories allowed",
+      });
+      return;
+    }
+
+    if (name.length > 40) {
+      res.status(400).json({
+        success: false,
+        message: "Product name cannot exceed 40 characters",
+      });
+      return;
+    }
+
+    if (tagline.length > 60) {
+      res.status(400).json({
+        success: false,
+        message: "Tagline cannot exceed 60 characters",
+      });
+      return;
+    }
+
+    // Validate topics exist and are approved
+    const validTopics = await Subcategory.find({
+      _id: { $in: topics },
+      status: "approved",
+    });
+
+    if (validTopics.length !== topics.length) {
+      res.status(400).json({
+        success: false,
+        message: "One or more categories are invalid or not approved",
+      });
+      return;
+    }
+
+    // Validate makers exist
+    const validMakers = await User.find({ _id: { $in: makers } });
+    if (validMakers.length !== makers.length) {
+      res.status(400).json({
+        success: false,
+        message: "One or more makers are invalid",
+      });
+      return;
+    }
+
+    // Check if slug already exists
+    const slugToUse = slug || name
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, "")
+      .replace(/[\s_-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+
+    const existingProduct = await Product.findOne({ slug: slugToUse });
+    if (existingProduct) {
+      res.status(400).json({
+        success: false,
+        message: "A product with this name/slug already exists",
+      });
+      return;
+    }
+
+    const linksData = typeof links === 'string' ? JSON.parse(links) : links;
+    const productStatus = req.body.status || "pending";
+    const productData: any = {
+      name,
+      tagline,
+      slug: slugToUse,
+      description,
+      links: { website: linksData.website },
+      thumbnail,
+      gallery: gallery || [],
+      firstComment,
+      makers,
+      topics,
+      pricingType,
+      isOpenSource: isOpenSource || false,
+      isAiProduct: isAiProduct || false,
+      status: productStatus,
+      scheduledLaunchDate: scheduledLaunchDate || null,
+    };
+
+    if (productStatus === "approved") {
+      productData.launchedAt = scheduledLaunchDate ? new Date(scheduledLaunchDate) : new Date();
+    }
+
+    const product = await Product.create(productData);
+
+    const populatedProduct = await Product.findById(product._id)
+      .populate("makers", "fullname email")
+      .populate("topics", "name slug");
+
+    res.status(201).json({
+      success: true,
+      message: "Product submitted successfully",
+      data: populatedProduct,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "ValidationError") {
+      res.status(400).json({ success: false, message: error.message });
+      return;
+    }
+    const errorMessage = error instanceof Error ? error.message : "Server error";
+    res.status(500).json({ success: false, message: errorMessage });
+  }
+}
+
+/**
+ * Update a product with Cloudinary media uploads
+ * PUT /api/products/cloudinary/:id
+ */
+export async function updateProductCloudinaryController(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    let {
+      name,
+      tagline,
+      slug,
+      description,
+      links,
+      firstComment,
+      makers,
+      topics,
+      pricingType,
+      isOpenSource,
+      isAiProduct,
+      scheduledLaunchDate,
+    } = req.body;
+
+    const product = await Product.findById(id);
+    if (!product) {
+      res.status(404).json({ success: false, message: "Product not found" });
+      return;
+    }
+
+    if (!links && req.body['links.website']) {
+      links = { website: req.body['links.website'] };
+    }
+
+    if (typeof makers === 'string') {
+      makers = makers.includes(',') ? makers.split(',').map(id => id.trim()) : [makers];
+    } else if (makers === undefined) {
+      makers = product.makers;
+    }
+
+    if (typeof topics === 'string') {
+      topics = topics.includes(',') ? topics.split(',').map(id => id.trim()) : [topics];
+    } else if (topics === undefined) {
+      topics = product.topics;
+    }
+
+    // Handle file uploads via Cloudinary
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+    let thumbnail = req.body.thumbnail;
+    let gallery = req.body.gallery ? JSON.parse(req.body.gallery) : undefined;
+    let existingGallery = req.body.existingGallery ? JSON.parse(req.body.existingGallery) : [];
+
+    const {
+      uploadToCloudinary,
+      uploadMultipleToCloudinary,
+      deleteByUrl,
+    } = await import("../utils/uploadToCloudinary.js");
+
+    // Upload new thumbnail to Cloudinary
+    if (files?.thumbnail && files.thumbnail[0]) {
+      // Delete old thumbnail if it was on Cloudinary
+      if (product.thumbnail?.includes("res.cloudinary.com")) {
+        deleteByUrl(product.thumbnail).catch((err) =>
+          console.warn("[Cloudinary] Failed to delete old thumbnail:", err)
+        );
+      }
+      const thumbResult = await uploadToCloudinary(files.thumbnail[0].buffer, {
+        folder: "products/thumbnails",
+      });
+      thumbnail = thumbResult.secure_url;
+    } else if (thumbnail === undefined) {
+      thumbnail = product.thumbnail;
+    }
+
+    // Handle gallery: merge existing URLs with new uploaded files
+    if (files?.gallery && files.gallery.length > 0) {
+      const galleryResults = await uploadMultipleToCloudinary(files.gallery, {
+        folder: "products/gallery",
+      });
+      const newGalleryUrls = galleryResults.map((r) => r.secure_url);
+      gallery = [...existingGallery, ...newGalleryUrls];
+    } else if (existingGallery.length > 0) {
+      gallery = existingGallery;
+    } else if (gallery === undefined) {
+      gallery = product.gallery;
+    }
+
+    // Update fields
+    if (name) product.name = name;
+    if (tagline) product.tagline = tagline;
+    if (description) product.description = description;
+    if (thumbnail) product.thumbnail = thumbnail;
+    if (gallery !== undefined) product.gallery = gallery;
+    if (firstComment !== undefined) product.firstComment = firstComment;
+    if (makers) product.makers = makers;
+    if (topics) product.topics = topics;
+    if (pricingType !== undefined) product.pricingType = pricingType;
+    if (isOpenSource !== undefined) product.isOpenSource = isOpenSource === 'true' || isOpenSource === true;
+    if (isAiProduct !== undefined) product.isAiProduct = isAiProduct === 'true' || isAiProduct === true;
+    if (scheduledLaunchDate !== undefined) product.scheduledLaunchDate = scheduledLaunchDate;
+
+    if (links) {
+      const linksData = typeof links === 'string' ? JSON.parse(links) : links;
+      product.links = { ...product.links, ...linksData };
+    }
+
+    if (slug && slug !== product.slug) {
+      const sanitizedSlug = slug
+        .toLowerCase().trim()
+        .replace(/[^\w\s-]/g, "")
+        .replace(/[\s_-]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+
+      if (sanitizedSlug) {
+        const existingProduct = await Product.findOne({ slug: sanitizedSlug, _id: { $ne: id } });
+        if (existingProduct) {
+          res.status(400).json({ success: false, message: "A product with this slug already exists" });
+          return;
+        }
+        product.slug = sanitizedSlug;
+      }
+    }
+
+    await product.save();
+
+    const populatedProduct = await Product.findById(product._id)
+      .populate("makers", "fullname email")
+      .populate("topics", "name slug");
+
+    res.status(200).json({
+      success: true,
+      message: "Product updated successfully",
+      data: populatedProduct,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Server error";
+    res.status(500).json({ success: false, message: errorMessage });
   }
 }
 
@@ -1203,4 +1578,6 @@ export default {
   getProductLaunchesController,
   getProductTeamController,
   saveProductController,
+  createProductCloudinaryController,
+  updateProductCloudinaryController,
 };

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { verifyToken, isAdmin } from "../../middleware/authMiddleware.js";
-import { uploadImage } from "../../config/multer.js";
+import { uploadImageMemory } from "../../config/multer.js";
+import { handleMulterError } from "../../middleware/uploadMiddleware.js";
 import {
   getStoriesController,
   getStoryTagsController,
@@ -23,14 +24,16 @@ router.post(
   "/admin",
   verifyToken,
   isAdmin,
-  uploadImage.fields([{ name: "coverImage", maxCount: 1 }]),
+  uploadImageMemory.fields([{ name: "coverImage", maxCount: 1 }]),
+  handleMulterError,
   createStoryController
 );
 router.put(
   "/admin/:id",
   verifyToken,
   isAdmin,
-  uploadImage.fields([{ name: "coverImage", maxCount: 1 }]),
+  uploadImageMemory.fields([{ name: "coverImage", maxCount: 1 }]),
+  handleMulterError,
   updateStoryController
 );
 router.delete("/admin/:id", verifyToken, isAdmin, deleteStoryController);

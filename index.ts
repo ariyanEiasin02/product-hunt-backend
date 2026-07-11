@@ -8,6 +8,7 @@ import connectDB from "./config/db.js";
 import router from "./routes/index.js";
 import { createUploadDirectories } from "./utils/fileUploadHelper.js";
 import { initSocketIO } from "./config/socket.js";
+import { initCloudinary } from "./config/cloudinary.js";
 
 // Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -15,6 +16,9 @@ const __dirname = path.dirname(__filename);
 
 // Load environment variables
 dotenv.config();
+
+// Initialize Cloudinary with credentials from .env
+initCloudinary();
 
 // Connect to MongoDB
 connectDB();
@@ -42,7 +46,7 @@ const corsOptions = {
     // Allow all origins in development, or specific origins in production
     const allowedOrigins = process.env.ALLOWED_ORIGINS 
       ? process.env.ALLOWED_ORIGINS.split(',')
-      : ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000','https://product-hunt-admin.netlify.app'];
+      : ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000','https://product-hunt-admin.netlify.app','https://product-hunt-frontend.netlify.app'];
     
     if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
       callback(null, true);

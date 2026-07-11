@@ -11,18 +11,20 @@ import {
   getProductAlternativesController,
   getProductLaunchesController,
   getProductTeamController,
-  saveProductController
+  saveProductController,
+  createProductCloudinaryController,
+  updateProductCloudinaryController
 } from "../../controllers/productController.js";
 import { isAdmin, verifyToken, optionalAuth } from "../../middleware/authMiddleware.js";
-import { uploadProductMedia } from "../../config/multer.js";
+import { uploadProductMediaMemory } from "../../config/multer.js";
 import { handleMulterError } from "../../middleware/uploadMiddleware.js";
 
 const router = Router();
 
-// Create new product submission (with file upload support)
+// Create new product submission (uploads to Cloudinary via memory storage)
 router.post(
   "/",
-  uploadProductMedia.fields([
+  uploadProductMediaMemory.fields([
     { name: "thumbnail", maxCount: 1 },
     { name: "gallery", maxCount: 10 },
   ]),
@@ -30,12 +32,12 @@ router.post(
   createProductController
 );
 
-// Update product (Admin only)
+// Update product (Admin only) — uploads to Cloudinary via memory storage
 router.put(
   "/:id",
   verifyToken,
   isAdmin,
-  uploadProductMedia.fields([
+  uploadProductMediaMemory.fields([
     { name: "thumbnail", maxCount: 1 },
     { name: "gallery", maxCount: 10 },
   ]),
@@ -64,4 +66,33 @@ router.put("/:id/status", verifyToken, isAdmin, updateProductStatusController);
 
 // Upvote a product
 router.post("/:id/upvote", verifyToken, upvoteProductController);
+
+// ========================================================================
+// CLOUDINARY PRODUCT ROUTES (uses memory storage)
+// ========================================================================
+
+// Create product with Cloudinary media uploads
+router.post(
+  "/cloudinary",
+  uploadProductMediaMemory.fields([
+    { name: "thumbnail", maxCount: 1 },
+    { name: "gallery", maxCount: 10 },
+  ]),
+  handleMulterError,
+  createProductCloudinaryController
+);
+
+// Update product with Cloudinary media uploads (Admin only)
+router.put(
+  "/cloudinary/:id",
+  verifyToken,
+  isAdmin,
+  uploadProductMediaMemory.fields([
+    { name: "thumbnail", maxCount: 1 },
+    { name: "gallery", maxCount: 10 },
+  ]),
+  handleMulterError,
+  updateProductCloudinaryController
+);
+
 export default router;

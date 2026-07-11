@@ -188,6 +188,16 @@ export const uploadImagesMemory = multer({
   },
 });
 
+// Memory storage for product media (thumbnail + gallery) for cloud uploads
+export const uploadProductMediaMemory = multer({
+  storage: memoryStorage,
+  fileFilter: imageFilter,
+  limits: {
+    fileSize: MAX_IMAGE_SIZE,
+    files: 11, // 1 thumbnail + 10 gallery images
+  },
+});
+
 // Export constants for use in other files
 export const FILE_SIZE_LIMITS = {
   IMAGE: MAX_IMAGE_SIZE,
