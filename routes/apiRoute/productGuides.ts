@@ -11,7 +11,7 @@ import {
   deleteGuideController,
 } from "../../controllers/productGuideController.js";
 import { verifyToken, isAdmin } from "../../middleware/authMiddleware.js";
-import { uploadImage } from "../../config/multer.js";
+import { uploadImageMemory } from "../../config/multer.js";
 import { handleMulterError } from "../../middleware/uploadMiddleware.js";
 
 const router = Router();
@@ -24,8 +24,8 @@ router.get("/slug/:slug",getGuideBySlugController);
 // Admin routes
 router.get("/", verifyToken, isAdmin, getAllGuidesController);
 router.get("/:id",verifyToken, isAdmin, getGuideByIdController);
-router.post("/",verifyToken, isAdmin, uploadImage.single("image"), handleMulterError, createGuideController);
-router.put("/:id", verifyToken, isAdmin, uploadImage.single("image"), handleMulterError, updateGuideController);
+router.post("/",verifyToken, isAdmin, uploadImageMemory.single("image"), handleMulterError, createGuideController);
+router.put("/:id", verifyToken, isAdmin, uploadImageMemory.single("image"), handleMulterError, updateGuideController);
 router.patch("/:id/toggle-status", verifyToken, isAdmin, toggleGuideStatusController);
 router.delete("/:id",verifyToken, isAdmin, deleteGuideController);
 

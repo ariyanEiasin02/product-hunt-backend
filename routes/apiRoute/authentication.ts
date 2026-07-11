@@ -16,7 +16,8 @@ import {
   resetPasswordController,
 } from "../../controllers/registrationController.js";
 import { isAdmin, verifyToken, isAdminOrSelf } from "../../middleware/authMiddleware.js";
-import { uploadAvatar, uploadImageMemory } from "../../config/multer.js";
+import { uploadImageMemory } from "../../config/multer.js";
+import { handleMulterError } from "../../middleware/uploadMiddleware.js";
 
 const router = Router();
 
@@ -27,12 +28,12 @@ router.post("/login", loginController);
 // Current user
 router.get("/me", verifyToken, getCurrentUserController);
 
-// Profile management
-router.put("/update-profile", verifyToken, updateProfileController);
-router.put("/update-avatar", verifyToken, uploadAvatar.single("profileImage"), updateAvatarController);
+// Profile management — both endpoints now use memory storage for Cloudinary uploads
+router.put("/update-profile", verifyToken, uploadImageMemory.single("profileImage"), handleMulterError, updateProfileController);
+router.put("/update-avatar", verifyToken, uploadImageMemory.single("profileImage"), handleMulterError, updateAvatarController);
 
 // Cloudinary avatar update (uses memory storage)
-router.put("/update-avatar/cloudinary", verifyToken, uploadImageMemory.single("profileImage"), updateAvatarCloudinaryController);
+router.put("/update-avatar/cloudinary", verifyToken, uploadImageMemory.single("profileImage"), handleMulterError, updateAvatarCloudinaryController);
 
 // Password management
 router.put("/change-password", verifyToken, changePasswordController);

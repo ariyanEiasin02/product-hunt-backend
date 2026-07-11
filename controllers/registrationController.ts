@@ -323,6 +323,7 @@ async function getCurrentUserController(req: AuthRequest, res: Response): Promis
 
 // ============================================
 // UPDATE PROFILE — PUT /api/authentication/update-profile
+// Supports both text fields AND optional profileImage upload via Cloudinary
 // ============================================
 async function updateProfileController(req: AuthRequest, res: Response): Promise<void> {
     try {
@@ -368,6 +369,26 @@ async function updateProfileController(req: AuthRequest, res: Response): Promise
                 : [];
         }
 
+        // Handle optional profile image upload to Cloudinary
+        const file = req.file;
+        if (file) {
+            const { uploadToCloudinary, deleteByUrl } = await import("../utils/uploadToCloudinary.js");
+
+            // Delete old Cloudinary avatar if it exists
+            const oldProfileImage = user.profileImage;
+            if (oldProfileImage && oldProfileImage.includes("res.cloudinary.com")) {
+                deleteByUrl(oldProfileImage).catch((err) =>
+                    console.warn("[Cloudinary] Failed to delete old avatar:", err)
+                );
+            }
+
+            // Upload new avatar to Cloudinary
+            const result = await uploadToCloudinary(file.buffer, {
+                folder: `users/${userId}/avatar`,
+            });
+            user.profileImage = result.secure_url;
+        }
+
         await user.save();
 
         res.status(200).json({
@@ -393,7 +414,8 @@ async function updateProfileController(req: AuthRequest, res: Response): Promise
 }
 
 // ============================================
-// UPDATE AVATAR (disk storage) — PUT /api/authentication/update-avatar
+// UPDATE AVATAR (Cloudinary) — PUT /api/authentication/update-avatar
+// Now uses Cloudinary for all uploads (was previously disk storage)
 // ============================================
 async function updateAvatarController(req: AuthRequest, res: Response): Promise<void> {
     try {
@@ -415,9 +437,25 @@ async function updateAvatarController(req: AuthRequest, res: Response): Promise<
             return;
         }
 
-        // Create file URL from the uploaded file path
-        const { createFileUrlFromPath } = await import("../utils/fileUploadHelper.js");
-        user.profileImage = createFileUrlFromPath(file.path);
+        // Import Cloudinary utilities once
+        const { uploadToCloudinary, deleteByUrl } = await import("../utils/uploadToCloudinary.js");
+
+        // Delete old Cloudinary avatar if it exists
+        const oldProfileImage = user.profileImage;
+        if (oldProfileImage && oldProfileImage.includes("res.cloudinary.com")) {
+            deleteByUrl(oldProfileImage).catch((err) =>
+                console.warn("[Cloudinary] Failed to delete old avatar:", err)
+            );
+        }
+
+        // Upload new avatar to Cloudinary
+        // NOTE: No useFilename — Cloudinary auto-generates a unique public_id
+        // so every upload creates a brand new image without overwriting.
+        const result = await uploadToCloudinary(file.buffer, {
+            folder: `users/${userId}/avatar`,
+        });
+
+        user.profileImage = result.secure_url;
         await user.save();
 
         res.status(200).json({
@@ -425,6 +463,7 @@ async function updateAvatarController(req: AuthRequest, res: Response): Promise<
             message: "Avatar updated successfully",
             data: {
                 profileImage: user.profileImage,
+                publicId: result.public_id,
             },
         });
     } catch (error) {
