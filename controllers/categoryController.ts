@@ -2,7 +2,7 @@ import e, { Request, Response } from "express";
 import Category from "../models/categorySchema.js";
 import Subcategory from "../models/subcategorySchema.js";
 import Product from "../models/productSchema.js";
-import { createFileUrlFromPath } from "../utils/fileUploadHelper.js";
+import { uploadToCloudinary } from "../utils/uploadToCloudinary.js";
 
 export async function createCategoryController(
   req: Request,
@@ -170,12 +170,20 @@ export async function createSubcategoryController(
       return;
     }
 
+    let image = req.body.image || undefined;
+    if (req.file) {
+      const result = await uploadToCloudinary(req.file.buffer, {
+        folder: "subcategories",
+      });
+      image = result.secure_url;
+    }
+
     const subcategory = await Subcategory.create({
       name,
       slug,
       description,
       category,
-      image: req.file ? createFileUrlFromPath(req.file.path) : (req.body.image || undefined),
+      image,
     });
 
     await Category.findByIdAndUpdate(category, {
@@ -209,9 +217,12 @@ export async function updateSubCategoryController(
     subcategory.slug = slug;
     subcategory.description = description;
     subcategory.category = category;
-    // Handle image upload
+    // Handle image upload to Cloudinary
     if (req.file) {
-      subcategory.image = createFileUrlFromPath(req.file.path);
+      const result = await uploadToCloudinary(req.file.buffer, {
+        folder: "subcategories",
+      });
+      subcategory.image = result.secure_url;
     } else if (req.body.image) {
       subcategory.image = req.body.image;
     }

@@ -13,10 +13,6 @@ import {
   deleteCloudinaryResourceController,
 } from "../../controllers/uploadController.js";
 import {
-  uploadImage,
-  uploadImages,
-  uploadProductMedia,
-  uploadAvatar,
   uploadImageMemory,
   uploadImagesMemory,
   uploadProductMediaMemory,
@@ -29,30 +25,30 @@ import { verifyToken } from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Single image upload
+// Single image upload (now uses Cloudinary via memory storage)
 router.post(
   "/upload/image",
   verifyToken,
-  uploadImage.single("image"),
+  uploadImageMemory.single("image"),
   handleMulterError,
   requireSingleFile("image"),
   uploadSingleImageController
 );
 
-// Multiple images upload
+// Multiple images upload (now uses Cloudinary via memory storage)
 router.post(
   "/upload/images",
   verifyToken,
-  uploadImages.array("images", 10),
+  uploadImagesMemory.array("images", 10),
   handleMulterError,
   uploadMultipleImagesController
 );
 
-// Product media upload (thumbnail + gallery)
+// Product media upload (thumbnail + gallery, now uses Cloudinary)
 router.post(
   "/upload/product-media",
   verifyToken,
-  uploadProductMedia.fields([
+  uploadProductMediaMemory.fields([
     { name: "thumbnail", maxCount: 1 },
     { name: "gallery", maxCount: 10 },
   ]),
@@ -60,11 +56,11 @@ router.post(
   uploadProductMediaController
 );
 
-// Avatar upload
+// Avatar upload (now uses Cloudinary via memory storage)
 router.post(
   "/upload/avatar",
   verifyToken,
-  uploadAvatar.single("avatar"),
+  uploadImageMemory.single("avatar"),
   handleMulterError,
   requireSingleFile("avatar"),
   uploadAvatarController

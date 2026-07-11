@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import ProductGuide from "../models/productGuideSchema.js";
 import Faq from "../models/faqSchema.js";
-import { createFileUrlFromPath } from "../utils/fileUploadHelper.js";
+import { uploadToCloudinary } from "../utils/uploadToCloudinary.js";
 
 function generateSlug(title: string): string {
   return title
@@ -131,7 +131,13 @@ export async function createGuideController(req: Request, res: Response): Promis
       return;
     }
 
-    const imageUrl = req.file ? createFileUrlFromPath(req.file.path) : "";
+    let imageUrl = "";
+    if (req.file) {
+      const result = await uploadToCloudinary(req.file.buffer, {
+        folder: "product-guides",
+      });
+      imageUrl = result.secure_url;
+    }
 
     const guide = await ProductGuide.create({
       title: title.trim(),
@@ -172,7 +178,13 @@ export async function updateGuideController(req: Request, res: Response): Promis
 
     guide.title            = title            ?? guide.title;
     guide.slug             = newSlug;
-    guide.image            = req.file ? createFileUrlFromPath(req.file.path) : guide.image;
+    if (req.file) {
+      const result = await uploadToCloudinary(req.file.buffer, {
+        folder: "product-guides",
+      });
+      guide.image = result.secure_url;
+    }
+    // If no new file uploaded, keep the existing image
     guide.shortDescription = shortDescription ?? guide.shortDescription;
     guide.description      = description      ?? guide.description;
     if (status) guide.status = status;

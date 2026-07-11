@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import Story from "../models/storySchema.js";
 import { AuthRequest } from "../middleware/authMiddleware.js";
-import { createFileUrlFromPath } from "../utils/fileUploadHelper.js";
+import { uploadToCloudinary } from "../utils/uploadToCloudinary.js";
 
 // ── SSE clients for real-time updates ──
 const sseClients: Set<Response> = new Set();
@@ -308,11 +308,14 @@ export async function createStoryController(
       return;
     }
 
-    // Handle cover image upload
+    // Handle cover image upload to Cloudinary
     let coverImage = req.body.coverImage || "";
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
     if (files?.coverImage && files.coverImage[0]) {
-      coverImage = createFileUrlFromPath(files.coverImage[0].path);
+      const result = await uploadToCloudinary(files.coverImage[0].buffer, {
+        folder: "stories/cover-images",
+      });
+      coverImage = result.secure_url;
     }
 
     // Auto-generate slug or sanitize provided slug
@@ -425,10 +428,13 @@ export async function updateStoryController(
       return;
     }
 
-    // Handle cover image upload
+    // Handle cover image upload to Cloudinary
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
     if (files?.coverImage && files.coverImage[0]) {
-      story.coverImage = createFileUrlFromPath(files.coverImage[0].path);
+      const result = await uploadToCloudinary(files.coverImage[0].buffer, {
+        folder: "stories/cover-images",
+      });
+      story.coverImage = result.secure_url;
     } else if (req.body.coverImage !== undefined) {
       story.coverImage = req.body.coverImage;
     }
