@@ -8,7 +8,6 @@ import {
   deleteNotificationController,
   clearAllNotificationsController,
   adminGetAllNotificationsController,
-  followUserController,
 } from "../../controllers/notificationController.js";
 import { verifyToken } from "../../middleware/authMiddleware.js";
 
@@ -35,10 +34,6 @@ router.patch("/:id/read", verifyToken, markAsReadController);
 
 // DELETE /api/notifications/:id
 router.delete("/:id",verifyToken, deleteNotificationController);
-
-// ── Follow / Unfollow ───────────────────────────────────────────────────────
-// POST /api/notifications/follow/:userId
-router.post("/follow/:userId", verifyToken, followUserController);
 
 // ── Admin ───────────────────────────────────────────────────────────────────
 // GET /api/notifications/admin/all

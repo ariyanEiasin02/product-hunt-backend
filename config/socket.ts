@@ -17,7 +17,13 @@ export function initSocketIO(httpServer: HttpServer): Server {
     cors: {
       origin: process.env.ALLOWED_ORIGINS
         ? process.env.ALLOWED_ORIGINS.split(",")
-        : ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"],
+        : [
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://127.0.0.1:3000",
+            "https://product-hunt-admin.netlify.app",
+            "https://product-hunt-frontend.netlify.app",
+          ],
       credentials: true,
       methods: ["GET", "POST"],
     },
@@ -49,7 +55,10 @@ export function initSocketIO(httpServer: HttpServer): Server {
   // ── Connection handling ─────────────────────────────────────────────────
   io.on("connection", (socket: Socket) => {
     const userId: string = (socket as any).userId;
-    console.log(`[Socket.IO] User ${userId} connected (${socket.id})`);
+    const activeConnections = (userSockets.get(userId)?.size || 0) + 1;
+    console.log(
+      `[Socket.IO] User ${userId} connected (socket=${socket.id}, active=${activeConnections})`
+    );
 
     // Track socket
     if (!userSockets.has(userId)) {
@@ -59,14 +68,29 @@ export function initSocketIO(httpServer: HttpServer): Server {
 
     // Join a personal room so we can send targeted notifications
     socket.join(`user:${userId}`);
+    console.log(`[Socket.IO] User ${userId} joined room user:${userId}`);
 
-    socket.on("disconnect", () => {
-      console.log(`[Socket.IO] User ${userId} disconnected (${socket.id})`);
-      const sockets = userSockets.get(userId);
-      if (sockets) {
-        sockets.delete(socket.id);
-        if (sockets.size === 0) userSockets.delete(userId);
+    // ── Listen for a manual room-join (useful for client re-registration) ──
+    socket.on("register", (data: { userId?: string }) => {
+      const joinId = data?.userId || userId;
+      socket.join(`user:${joinId}`);
+      console.log(`[Socket.IO] User ${joinId} re-registered and joined room user:${joinId}`);
+    });
+
+    socket.on("disconnect", (reason: string) => {
+      const remaining = userSockets.get(userId);
+      const stillActive = remaining ? remaining.size - 1 : 0;
+      console.log(
+        `[Socket.IO] User ${userId} disconnected (socket=${socket.id}, reason=${reason}, remaining=${stillActive})`
+      );
+      if (remaining) {
+        remaining.delete(socket.id);
+        if (remaining.size === 0) userSockets.delete(userId);
       }
+    });
+
+    socket.on("connect_error", (err: Error) => {
+      console.error(`[Socket.IO] Connection error for user ${userId}:`, err.message);
     });
   });
 
@@ -99,14 +123,28 @@ export function emitNotification(
     createdAt: string;
   }
 ): void {
-  if (!io) return;
-  io.to(`user:${recipientId}`).emit("notification:new", payload);
+  if (!io) {
+    console.warn(`[Socket.IO] emitNotification skipped — io not initialized (recipient=${recipientId})`);
+    return;
+  }
+  const room = `user:${recipientId}`;
+  const roomSockets = io.sockets?.adapter?.rooms?.get(room);
+  const recipientCount = roomSockets ? roomSockets.size : 0;
+  io.to(room).emit("notification:new", payload);
+  console.log(
+    `[Socket.IO] Emitted "notification:new" to ${room} (type=${payload.type}, recipientSockets=${recipientCount})`
+  );
 }
 
 /**
  * Broadcast the updated unread count to a user (useful after mark-all-read etc.)
  */
 export function emitUnreadCount(recipientId: string, count: number): void {
-  if (!io) return;
-  io.to(`user:${recipientId}`).emit("notification:unread-count", { count });
+  if (!io) {
+    console.warn(`[Socket.IO] emitUnreadCount skipped — io not initialized (recipient=${recipientId})`);
+    return;
+  }
+  const room = `user:${recipientId}`;
+  io.to(room).emit("notification:unread-count", { count });
+  console.log(`[Socket.IO] Emitted "notification:unread-count" to ${room} (count=${count})`);
 }

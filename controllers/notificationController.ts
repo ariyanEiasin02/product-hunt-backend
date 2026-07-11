@@ -208,12 +208,21 @@ export async function removeNotificationIfExists(opts: {
   entityId: string;
 }): Promise<void> {
   try {
-    await Notification.findOneAndDelete({
+    const deleted = await Notification.findOneAndDelete({
       recipient: opts.recipient,
       actor:     opts.actor,
       type:      opts.type,
       entityId:  opts.entityId,
     });
+
+    // If a notification was actually removed, emit the updated unread count
+    if (deleted) {
+      const count = await Notification.countDocuments({ recipient: opts.recipient, read: false });
+      emitUnreadCount(opts.recipient, count);
+      console.log(
+        `[Notification] Removed notification (${opts.type}) for user ${opts.recipient}, unread count: ${count}`
+      );
+    }
   } catch (err) {
     console.error("[Notification] removeNotificationIfExists error:", err);
   }
@@ -314,66 +323,3 @@ export async function adminGetAllNotificationsController(
   }
 }
 
-// ─── Follow / Unfollow user ───────────────────────────────────────────────────
-export async function followUserController(
-  req: AuthRequest,
-  res: Response
-): Promise<void> {
-  try {
-    const actorId = req.user!.id;
-    const { userId } = req.params; // target
-
-    if (actorId === userId) {
-      res.status(400).json({ success: false, message: "You cannot follow yourself" });
-      return;
-    }
-
-    const [actor, target] = await Promise.all([
-      User.findById(actorId),
-      User.findById(userId),
-    ]);
-
-    if (!actor || !target) {
-      res.status(404).json({ success: false, message: "User not found" }); return;
-    }
-
-    const isFollowing = actor.following?.some((id) => id.toString() === userId);
-
-    if (isFollowing) {
-      // ── Unfollow ──
-      await Promise.all([
-        User.findByIdAndUpdate(actorId, { $pull: { following: userId } }),
-        User.findByIdAndUpdate(userId,  { $pull: { followers: actorId } }),
-      ]);
-      await createNotification({
-        recipient: userId,
-        actor:     actorId,
-        type:      "unfollow",
-        message:   `${actor.fullname} unfollowed you`,
-        entityId:  actorId,
-        entityType: "user",
-        link:      `/profile/${actor.username}`,
-      });
-      res.json({ success: true, isFollowing: false, message: "Unfollowed" });
-    } else {
-      // ── Follow ──
-      await Promise.all([
-        User.findByIdAndUpdate(actorId, { $addToSet: { following: userId } }),
-        User.findByIdAndUpdate(userId,  { $addToSet: { followers: actorId } }),
-      ]);
-      await createNotification({
-        recipient:  userId,
-        actor:      actorId,
-        type:       "follow",
-        message:    `${actor.fullname} started following you`,
-        entityId:   actorId,
-        entityType: "user",
-        link:       `/profile/${actor.username}`,
-      });
-      res.json({ success: true, isFollowing: true, message: "Followed" });
-    }
-  } catch (error) {
-    console.error("followUser error:", error);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-}
