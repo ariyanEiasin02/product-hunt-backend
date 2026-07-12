@@ -354,21 +354,29 @@ export async function getNavbarCategoriesController(
   res: Response
 ): Promise<void> {
   try {
-    const categories = await Category.find({ status: "approved" }).limit(10).populate({
-      path: "subcategories",
-      match: { status: "approved" },
-       options: {
-      limit: 8,
-    },
-    });
+    const categories = await Category.find({ status: "approved" })
+      .select("_id name slug")
+      .limit(8)
+      .populate({
+        path: "subcategories",
+        match: { status: "approved" },
+        select: "_id name slug",
+       perDocumentLimit: 8,
+      });
+
     res.status(200).json({
       success: true,
       message: "Approved categories fetched successfully",
       data: categories,
     });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Server error";
-    res.status(500).json({ success: false, message: errorMessage });
+    const errorMessage =
+      error instanceof Error ? error.message : "Server error";
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage,
+    });
   }
 }
 
@@ -391,6 +399,9 @@ export async function getCategoryBySlugController(
     let category = await Category.findOne({ slug, status: "approved" }).populate({
       path: "subcategories",
       match: { status: "approved" },
+      options: {
+        limit: 6,
+      }
     });
 
     let isSubcategory = false;
@@ -408,6 +419,9 @@ export async function getCategoryBySlugController(
       parentCategory = await Category.findById(subcategory.category).populate({
         path: "subcategories",
         match: { status: "approved" },
+        options: {
+          limit: 6,
+        }
       });
     }
 
