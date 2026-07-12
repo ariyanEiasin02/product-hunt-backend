@@ -361,9 +361,6 @@ export async function getNavbarCategoriesController(
         path: "subcategories",
         match: { status: "approved" },
         select: "_id name slug",
-        options: {
-          limit: 8,
-        },
       });
 
     res.status(200).json({
