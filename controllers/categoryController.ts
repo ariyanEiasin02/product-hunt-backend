@@ -358,7 +358,7 @@ export async function getNavbarCategoriesController(
       path: "subcategories",
       match: { status: "approved" },
        options: {
-      limit: 10,
+      limit: 8,
     },
     });
     res.status(200).json({
@@ -391,6 +391,9 @@ export async function getCategoryBySlugController(
     let category = await Category.findOne({ slug, status: "approved" }).populate({
       path: "subcategories",
       match: { status: "approved" },
+      options: {
+        limit: 6,
+      }
     });
 
     let isSubcategory = false;
@@ -408,6 +411,9 @@ export async function getCategoryBySlugController(
       parentCategory = await Category.findById(subcategory.category).populate({
         path: "subcategories",
         match: { status: "approved" },
+        options: {
+          limit: 6,
+        }
       });
     }
 
