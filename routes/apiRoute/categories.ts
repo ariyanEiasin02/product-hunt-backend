@@ -14,6 +14,7 @@ import {
   getCategoryBySlugController,
   getApprovedSubcategoriesController,
   getNavbarCategoriesController,
+  getCategoriesAndSubcategoriesForSelectController,
 } from "../../controllers/categoryController.js";
 import { isAdmin, verifyToken, optionalAuth } from "../../middleware/authMiddleware.js";
 import { uploadImageMemory } from "../../config/multer.js";
@@ -38,6 +39,9 @@ router.get("/allNavCategories", getNavbarCategoriesController);
 
 // Get approved subcategories for product submission (topic selection)
 router.get("/approvedSubcategories", getApprovedSubcategoriesController);
+
+// Get categories and subcategories as a flat array for React Select dropdown
+router.get("/select-options", getCategoriesAndSubcategoriesForSelectController);
 
 // Get category/subcategory by slug with products
 router.get("/:slug", optionalAuth, getCategoryBySlugController);

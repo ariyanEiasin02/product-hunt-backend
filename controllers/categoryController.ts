@@ -637,3 +637,68 @@ export async function getApprovedSubcategoriesController(
     res.status(500).json({ success: false, message: errorMessage });
   }
 }
+
+// Get categories and subcategories as a flat array for React Select dropdown
+export async function getCategoriesAndSubcategoriesForSelectController(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    // Fetch approved categories and subcategories in parallel
+    const [categories, subcategories] = await Promise.all([
+      Category.find({ status: "approved" })
+        .select("_id name slug")
+        .sort({ name: 1 })
+        .lean(),
+      Subcategory.find({ status: "approved" })
+        .select("_id name slug category")
+        .populate("category", "_id name slug")
+        .sort({ name: 1 })
+        .lean(),
+    ]);
+
+    // Map categories to the expected flat format
+    const categoryItems = categories.map((cat) => ({
+      _id: cat._id,
+      name: cat.name,
+      slug: cat.slug,
+      type: "category" as const,
+    }));
+
+    // Map subcategories with parent category info
+    const subcategoryItems = subcategories.map((sub) => {
+      const parentCategory = sub.category as unknown as { _id: string; name: string; slug: string } | null;
+      return {
+        _id: sub._id,
+        name: sub.name,
+        slug: sub.slug,
+        type: "subcategory" as const,
+        parentCategory: parentCategory
+          ? {
+              _id: parentCategory._id,
+              name: parentCategory.name,
+              slug: parentCategory.slug,
+            }
+          : null,
+      };
+    });
+
+    // Combine into a single flat array, sorted alphabetically by name
+    const data = [...categoryItems, ...subcategoryItems].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Categories and subcategories fetched successfully",
+      data,
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Server error";
+    res.status(500).json({
+      success: false,
+      message: errorMessage,
+    });
+  }
+}
