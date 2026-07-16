@@ -714,7 +714,7 @@ export async function getHomePageProductsController(
           },
         ],
       })
-        .select("name slug description thumbnail upvotes commentsCount topics tagline upvotedBy")
+        .select("name slug thumbnail upvotes commentsCount topics tagline upvotedBy")
         .populate("topics", "name slug")
         .sort({ upvotes: -1, launchedAt: -1 })
         .limit(7),
@@ -738,7 +738,7 @@ export async function getHomePageProductsController(
           },
         ],
       })
-        .select("name slug description thumbnail upvotes commentsCount topics tagline upvotedBy")
+        .select("name slug thumbnail upvotes commentsCount topics tagline upvotedBy")
         .populate("topics", "name slug")
         .sort({ upvotes: -1, launchedAt: -1 })
         .limit(7),
@@ -762,7 +762,7 @@ export async function getHomePageProductsController(
           },
         ],
       })
-        .select("name slug description thumbnail upvotes commentsCount topics tagline upvotedBy")
+        .select("name slug thumbnail upvotes commentsCount topics tagline upvotedBy")
         .populate("topics", "name slug")
         .sort({ upvotes: -1, launchedAt: -1 })
         .limit(7),
