@@ -175,6 +175,7 @@ ProductSchema.pre("save", function () {
 
 // Index for better query performance
 ProductSchema.index({ status: 1, launchedAt: -1 });
+ProductSchema.index({ createdAt: -1 });
 ProductSchema.index({ topics: 1 });
 ProductSchema.index({ upvotes: -1 });
 

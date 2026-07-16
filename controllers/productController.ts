@@ -240,71 +240,72 @@ export async function getProductsController(
   res: Response
 ): Promise<void> {
   try {
-    const { status, topic, maker, pricingType, isAiProduct, limit = 20, page = 1 } = req.query;
-    const userId = (req as any).user?.id || null; 
+    const { status, topic, maker, pricingType, isAiProduct } = req.query;
+    const userId = (req as any).user?.id || null;
 
-    const filter: any = {};
+    // ── Parse & validate pagination ────────────────────────────────────────
+    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 20));
+    const skip = (page - 1) * limit;
 
-    if (status) {
-      filter.status = status;
-    }
+    // ── Build filter ───────────────────────────────────────────────────────
+    const filter: Record<string, any> = {};
+    if (status) filter.status = status;
+    if (topic) filter.topics = topic;
+    if (maker) filter.makers = maker;
+    if (pricingType) filter.pricingType = pricingType;
+    if (isAiProduct !== undefined) filter.isAiProduct = isAiProduct === "true";
 
-    if (topic) {
-      filter.topics = topic;
-    }
-
-    if (maker) {
-      filter.makers = maker;
-    }
-
-    if (pricingType) {
-      filter.pricingType = pricingType;
-    }
-
-    if (isAiProduct !== undefined) {
-      filter.isAiProduct = isAiProduct === "true";
-    }
-
-    const skip = (Number(page) - 1) * Number(limit);
-
+    // ── Fetch products (lean for performance) ──────────────────────────────
     const products = await Product.find(filter)
+      .select("name slug tagline thumbnail upvotes commentsCount topics makers createdAt launchedAt") // only needed fields
       .populate("makers", "fullname email")
       .populate("topics", "name slug")
-      .sort({ launchedAt: -1, createdAt: -1 })
-      .limit(Number(limit))
-      .skip(skip);
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .skip(skip)
+      .lean({ virtuals: false })
+      .exec();
 
-    // Add upvoteTrue field to each product
-    const productsWithUpvoteStatus = products.map((product) => {
-      const productObj: any = product.toObject();
-      // Check if user has upvoted: 1 = yes, 0 = no
-      if (userId && productObj.upvotedBy && Array.isArray(productObj.upvotedBy)) {
-        productObj.upvoteTrue = productObj.upvotedBy.some(
-          (id: any) => id.toString() === userId
-        ) ? 1 : 0;
-      } else {
-        productObj.upvoteTrue = 0;
+    // ── Batch upvote check (single query instead of per-product array fetch) ─
+    let upvotedProductIds = new Set<string>();
+    if (userId && products.length > 0) {
+      try {
+        const productIds = products.map((p: any) => p._id);
+        const upvotedDocs = await Product.find({ _id: { $in: productIds }, upvotedBy: userId })
+          .select("_id")
+          .lean()
+          .exec();
+        upvotedProductIds = new Set(upvotedDocs.map((d) => d._id.toString()));
+      } catch (err: any) {
+        console.error("[getProductsController] batch upvote query failed:", err.message, err);
       }
-      return productObj;
-    });
+    }
 
+    const productsWithUpvote = products.map((p: any) => ({
+      ...p,
+      upvoteTrue: upvotedProductIds.has(p._id.toString()) ? 1 : 0,
+    }));
+
+    // ── Count total (for pagination) ───────────────────────────────────────
     const total = await Product.countDocuments(filter);
 
     res.status(200).json({
       success: true,
       message: "Products retrieved successfully",
       data: {
-        products: productsWithUpvoteStatus,
+        products: productsWithUpvote,
         pagination: {
           total,
-          page: Number(page),
-          limit: Number(limit),
-          pages: Math.ceil(total / Number(limit)),
+          page,
+          limit,
+          pages: Math.ceil(total / limit) || 1,
         },
       },
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Server error";
+    console.error("[getProductsController] Error:", error);
     res.status(500).json({
       success: false,
       message: errorMessage,
@@ -714,7 +715,7 @@ export async function getHomePageProductsController(
           },
         ],
       })
-        .select("name slug description thumbnail upvotes commentsCount topics tagline upvotedBy")
+        .select("name slug thumbnail upvotes commentsCount topics tagline upvotedBy")
         .populate("topics", "name slug")
         .sort({ upvotes: -1, launchedAt: -1 })
         .limit(7),
@@ -738,7 +739,7 @@ export async function getHomePageProductsController(
           },
         ],
       })
-        .select("name slug description thumbnail upvotes commentsCount topics tagline upvotedBy")
+        .select("name slug thumbnail upvotes commentsCount topics tagline upvotedBy")
         .populate("topics", "name slug")
         .sort({ upvotes: -1, launchedAt: -1 })
         .limit(7),
@@ -762,7 +763,7 @@ export async function getHomePageProductsController(
           },
         ],
       })
-        .select("name slug description thumbnail upvotes commentsCount topics tagline upvotedBy")
+        .select("name slug thumbnail upvotes commentsCount topics tagline upvotedBy")
         .populate("topics", "name slug")
         .sort({ upvotes: -1, launchedAt: -1 })
         .limit(7),
