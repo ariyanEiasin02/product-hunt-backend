@@ -48,31 +48,39 @@ export const getDashboardOverview = async (
       Category.countDocuments({ isActive: false }),
     ]);
 
-    // Recent users (last 5)
+    // Recent users (last 5) — lean for performance
     const recentUsers = await User.find()
       .sort({ createdAt: -1 })
       .limit(5)
-      .select("fullname username email profileImage role createdAt");
+      .select("fullname username email profileImage role createdAt")
+      .lean({ virtuals: false })
+      .exec();
 
-    // Recent products (last 5)
+    // Recent products (last 5) — lean for performance
     const recentProducts = await Product.find()
       .sort({ createdAt: -1 })
       .limit(5)
       .select("name slug thumbnail status upvotes createdAt")
-      .populate("makers", "fullname profileImage");
+      .populate("makers", "fullname profileImage")
+      .lean({ virtuals: false })
+      .exec();
 
-    // Recent stories (last 5)
+    // Recent stories (last 5) — lean for performance
     const recentStories = await Story.find()
       .sort({ createdAt: -1 })
       .limit(5)
-      .select("title slug coverImage status tags createdAt author");
+      .select("title slug coverImage status tags createdAt author")
+      .lean({ virtuals: false })
+      .exec();
 
-    // Top products by upvotes (last 5)
+    // Top products by upvotes (last 5) — lean for performance
     const topProducts = await Product.find({ status: "approved" })
       .sort({ upvotes: -1 })
       .limit(5)
       .select("name slug thumbnail upvotes commentsCount createdAt")
-      .populate("makers", "fullname profileImage");
+      .populate("makers", "fullname profileImage")
+      .lean({ virtuals: false })
+      .exec();
 
     // Monthly registration stats (last 6 months)
     const sixMonthsAgo = new Date();
