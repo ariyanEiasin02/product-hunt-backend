@@ -8,6 +8,26 @@ import User from "../models/userSchema.js";
 import { uploadToCloudinary, uploadMultipleToCloudinary, deleteByUrl } from "../utils/uploadToCloudinary.js";
 import { createNotification, upsertNotification, removeNotificationIfExists } from "./notificationController.js";
 
+// ── Product status constants ─────────────────────────────────────────────
+export const PRODUCT_STATUSES = ["draft", "pending", "approved", "rejected"] as const;
+export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
+
+export const PRODUCT_STATUS_INFO: Record<ProductStatus, { label: string; description: string; color: string }> = {
+  draft:    { label: "Draft",    description: "Product is being prepared and not yet submitted for review",      color: "gray" },
+  pending:  { label: "Pending",  description: "Product has been submitted and is awaiting admin review",      color: "yellow" },
+  approved: { label: "Approved", description: "Product has been reviewed and approved for the platform",       color: "green" },
+  rejected: { label: "Rejected", description: "Product has been reviewed and was not approved",                color: "red" },
+};
+
+// Allowed status transitions: current → [allowed next statuses]
+// Since this endpoint is admin-only, admins have broad control
+const STATUS_TRANSITIONS: Record<ProductStatus, ProductStatus[]> = {
+  draft:    ["pending", "approved", "rejected"],
+  pending:  ["approved", "rejected"],
+  approved: [],  // Terminal state — once approved, cannot be changed
+  rejected: ["pending", "approved"], // Can resubmit or admin can directly approve
+};
+
 export async function createProductController(
   req: Request,
   res: Response
@@ -258,7 +278,7 @@ export async function getProductsController(
 
     // ── Fetch products (lean for performance) ──────────────────────────────
     const products = await Product.find(filter)
-      .select("name slug tagline thumbnail upvotes commentsCount topics makers createdAt launchedAt") // only needed fields
+      .select("name slug tagline thumbnail upvotes commentsCount topics makers createdAt launchedAt pricingType isAiProduct status") // only needed fields
       .populate("makers", "fullname email")
       .populate("topics", "name slug")
       .sort({ createdAt: -1 })
@@ -449,6 +469,37 @@ export async function getProductByIdController(
 }
 
 /**
+ * Get available product statuses
+ * GET /api/products/statuses
+ */
+export async function getProductStatusesController(
+  _req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const statuses = PRODUCT_STATUSES.map((s) => ({
+      value: s,
+      label: PRODUCT_STATUS_INFO[s].label,
+      description: PRODUCT_STATUS_INFO[s].description,
+      color: PRODUCT_STATUS_INFO[s].color,
+      allowedTransitions: STATUS_TRANSITIONS[s],
+    }));
+
+    res.status(200).json({
+      success: true,
+      message: "Product statuses retrieved successfully",
+      data: { statuses },
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Server error";
+    res.status(500).json({
+      success: false,
+      message: errorMessage,
+    });
+  }
+}
+
+/**
  * Update product status (admin only)
  * PATCH /api/products/:id/status
  */
@@ -460,10 +511,12 @@ export async function updateProductStatusController(
     const { id } = req.params;
     const { status, scheduledLaunchDate } = req.body;
 
-    if (!["draft", "pending", "approved", "rejected"].includes(status)) {
+    // Validate that status is one of the allowed values
+    if (!PRODUCT_STATUSES.includes(status)) {
+      const validStatuses = PRODUCT_STATUSES.join(", ");
       res.status(400).json({
         success: false,
-        message: "Invalid status value",
+        message: `Invalid status value "${status}". Valid values are: ${validStatuses}`,
       });
       return;
     }
@@ -474,6 +527,17 @@ export async function updateProductStatusController(
       res.status(404).json({
         success: false,
         message: "Product not found",
+      });
+      return;
+    }
+
+    // Validate status transition
+    const currentStatus = existingProduct.status as ProductStatus;
+    const allowedTransitions = STATUS_TRANSITIONS[currentStatus] ?? [];
+    if (!allowedTransitions.includes(status)) {
+      res.status(400).json({
+        success: false,
+        message: `Cannot transition product from "${currentStatus}" to "${status}". Allowed transitions from "${currentStatus}" are: ${allowedTransitions.join(", ") || "(none)"}`,
       });
       return;
     }
@@ -1581,4 +1645,5 @@ export default {
   saveProductController,
   createProductCloudinaryController,
   updateProductCloudinaryController,
+  getProductStatusesController,
 };

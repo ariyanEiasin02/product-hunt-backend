@@ -48,7 +48,7 @@ const VisitStreakSchema = new Schema<IVisitStreak>(
 // Index for leaderboard queries
 VisitStreakSchema.index({ longestStreak: -1, currentStreak: -1 });
 VisitStreakSchema.index({ currentStreak: -1 });
-VisitStreakSchema.index({ user: 1 });
+// Note: user index is already created by unique: true on the user field
 
 const VisitStreak = mongoose.model<IVisitStreak>("VisitStreak", VisitStreakSchema);
 export default VisitStreak;
