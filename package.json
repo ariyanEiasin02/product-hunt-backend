@@ -29,6 +29,7 @@
     "mongoose": "^9.1.2",
     "multer": "^2.2.0",
     "nodemailer": "^8.0.1",
+    "sharp": "^0.35.3",
     "socket.io": "^4.8.3",
     "streamifier": "^0.1.1"
   },
@@ -40,6 +41,7 @@
     "@types/multer": "^2.2.0",
     "@types/node": "^20.11.19",
     "@types/nodemailer": "^7.0.9",
+    "@types/sharp": "^0.31.1",
     "@types/streamifier": "^0.1.2",
     "cross-env": "^7.0.3",
     "tsx": "^4.21.0",

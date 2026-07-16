@@ -690,7 +690,7 @@ export async function getHomePageProductsController(
           },
         ],
       })
-        .select("name slug description thumbnail upvotes commentsCount topics tagline upvotedBy")
+        .select("name slug thumbnail upvotes commentsCount topics tagline upvotedBy")
         .populate("topics", "name slug")
         .sort({ launchedAt: -1, upvotes: -1 })
         .limit(10),
