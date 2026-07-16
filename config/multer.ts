@@ -3,7 +3,17 @@ import path from "path";
 import { Request } from "express";
 
 // Define allowed file types
-const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+// Note: GIF, TIFF, and AVIF are accepted here because they get converted to
+// WebP via Sharp in uploadToCloudinary before reaching Cloudinary storage.
+const ALLOWED_IMAGE_TYPES = [
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/tiff",
+  "image/avif",
+];
 const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/webm", "video/ogg"];
 const ALLOWED_DOCUMENT_TYPES = ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
 
@@ -68,20 +78,16 @@ const fileFilter = (
   }
 };
 
-// Image file filter (GIF not allowed for product thumbnails)
+// Image file filter — all convertible types accepted (converted to WebP server-side)
 const imageFilter = (
   req: Request,
   file: Express.Multer.File,
   cb: multer.FileFilterCallback
 ) => {
-  if (file.mimetype === "image/gif") {
-    cb(new Error("GIF images are not allowed. Please use JPG, PNG, or WebP."));
-    return;
-  }
   if (ALLOWED_IMAGE_TYPES.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error("Only image files are allowed (JPG, PNG, WebP)"));
+    cb(new Error("Only image files are allowed (JPG, PNG, WebP, GIF, TIFF, AVIF)"));
   }
 };
 

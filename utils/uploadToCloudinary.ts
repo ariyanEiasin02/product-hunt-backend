@@ -1,5 +1,7 @@
 import { v2 as cloudinary } from "cloudinary";
 import streamifier from "streamifier";
+import { convertToWebp } from "./imageConverter.js";
+import type { WebpConversionOptions } from "./imageConverter.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,6 +39,21 @@ export interface UploadToCloudinaryOptions {
   useFilename?: boolean;
   /** Extra Cloudinary upload options (overrides any above) */
   extraOptions?: Record<string, unknown>;
+
+  // ── WebP auto-conversion options (image uploads only) ───────────────────
+  /**
+   * Set to `false` to skip WebP conversion (e.g. for non-image buffers).
+   * Default: `true` for images, N/A for other resource types.
+   */
+  convertToWebp?: boolean;
+  /** Quality (1–100) for WebP output. Default: 80. */
+  webpQuality?: number;
+  /** Max width (px) — image will be proportionally resized. */
+  webpMaxWidth?: number;
+  /** Max height (px) — image will be proportionally resized. */
+  webpMaxHeight?: number;
+  /** Preserve alpha transparency (PNG/GIF). Default: true. */
+  webpPreserveTransparency?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -46,16 +63,24 @@ export interface UploadToCloudinaryOptions {
 /**
  * Upload a file **buffer** (typically from multer memory storage) to Cloudinary.
  *
+ * **Automatic WebP conversion:**
+ * For image uploads (`resourceType: "image"`), the buffer is automatically
+ * converted to WebP format using Sharp before being sent to Cloudinary.
+ * This reduces storage size and bandwidth while maintaining visual quality.
+ *
+ * - Pass `convertToWebp: false` to skip conversion (e.g. for format-sensitive use).
+ * - Use `webpQuality`, `webpMaxWidth`, `webpMaxHeight` to control the output.
+ *
  * @param buffer - The raw file buffer (e.g. `req.file.buffer`).
- * @param options - Optional folder, publicId, resourceType, etc.
+ * @param options - Optional folder, publicId, WebP settings, etc.
  * @returns A promise that resolves with the Cloudinary upload result.
  *
  * @example
  * const result = await uploadToCloudinary(req.file.buffer, { folder: "avatars" });
+ * // Result is always WebP (format: "webp")
  * // result.secure_url => "https://res.cloudinary.com/..."
- * // result.public_id  => "avatars/abc123"
  */
-export function uploadToCloudinary(
+export async function uploadToCloudinary(
   buffer: Buffer,
   options: UploadToCloudinaryOptions = {}
 ): Promise<CloudinaryUploadResult> {
@@ -66,10 +91,37 @@ export function uploadToCloudinary(
     transformation,
     useFilename,
     extraOptions,
+    convertToWebp: shouldConvert = true,
+    webpQuality = 80,
+    webpMaxWidth,
+    webpMaxHeight,
+    webpPreserveTransparency = true,
   } = options;
 
+  // ── Step 1: Auto-convert image buffers to WebP ───────────────────────────
+  let uploadBuffer = buffer;
+  let formatIsWebp = false;
+
+  if (shouldConvert && resourceType === "image") {
+    // Sharp handles all convertible formats internally and throws on invalid input.
+    // The try/catch ensures we never break the upload flow on conversion failure.
+    try {
+      const webpBuffer = await convertToWebp(buffer, {
+        quality: webpQuality,
+        preserveTransparency: webpPreserveTransparency,
+        maxWidth: webpMaxWidth,
+        maxHeight: webpMaxHeight,
+        keepMetadata: false,
+      });
+      uploadBuffer = webpBuffer;
+      formatIsWebp = true;
+    } catch (conversionError) {
+      console.error("[Cloudinary] WebP conversion failed, uploading original:", conversionError);
+    }
+  }
+
+  // ── Step 2: Upload (converted) buffer to Cloudinary ─────────────────────
   return new Promise((resolve, reject) => {
-    // Build upload options for Cloudinary
     const uploadOptions: Record<string, unknown> = {
       folder,
       resource_type: resourceType,
@@ -80,7 +132,11 @@ export function uploadToCloudinary(
     if (transformation) uploadOptions.transformation = transformation;
     if (useFilename) uploadOptions.use_filename = useFilename;
 
-    // Create an upload stream and pipe the buffer into it
+    // Tell Cloudinary the format is webp so it stores with correct extension
+    if (formatIsWebp) {
+      uploadOptions.format = "webp";
+    }
+
     const uploadStream = cloudinary.uploader.upload_stream(
       uploadOptions,
       (error, result) => {
@@ -110,8 +166,7 @@ export function uploadToCloudinary(
       }
     );
 
-    // Pipe the buffer into the stream
-    streamifier.createReadStream(buffer).pipe(uploadStream);
+    streamifier.createReadStream(uploadBuffer).pipe(uploadStream);
   });
 }
 
