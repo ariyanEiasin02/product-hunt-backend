@@ -261,7 +261,7 @@ export async function getProductsController(
       .select("name slug tagline thumbnail upvotes commentsCount topics makers createdAt launchedAt") // only needed fields
       .populate("makers", "fullname email")
       .populate("topics", "name slug")
-      .sort({ launchedAt: -1, createdAt: -1 })
+      .sort({ createdAt: -1 })
       .limit(limit)
       .skip(skip)
       .lean({ virtuals: false })
