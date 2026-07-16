@@ -75,9 +75,19 @@ app.use("/api/uploads", express.static(uploadsPath));
 app.use(router);
 
 
-// Server listen
+// Server listen — gracefully handle EADDRINUSE
 server.listen(port, () => {
   console.log(
     `Product Hunt backend listening at http://localhost:${port}`
   );
+});
+
+server.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`Port ${port} is already in use. Please stop the existing process or use a different port.`);
+    process.exit(1);
+  } else {
+    console.error("Server error:", err.message);
+    process.exit(1);
+  }
 });
