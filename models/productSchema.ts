@@ -174,9 +174,12 @@ ProductSchema.pre("save", function () {
 });
 
 // Index for better query performance
-ProductSchema.index({ status: 1, launchedAt: -1 });
+ProductSchema.index({ status: 1, launchedAt: -1, upvotes: -1 });
+ProductSchema.index({ status: 1, createdAt: -1, upvotes: -1 });
+ProductSchema.index({ createdAt: -1 });
 ProductSchema.index({ topics: 1 });
 ProductSchema.index({ upvotes: -1 });
+ProductSchema.index({ slug: 1, status: 1 });
 
 const Product = mongoose.models.Product || mongoose.model<IProduct>("Product", ProductSchema);
 export default Product;

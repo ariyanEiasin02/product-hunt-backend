@@ -6,6 +6,7 @@ import {
   getProductByIdController,
   updateProductController,
   updateProductStatusController,
+  getProductStatusesController,
   upvoteProductController,
   deleteProductController,
   getProductAlternativesController,
@@ -48,11 +49,14 @@ router.put(
 // Get all products with filters
 router.get("/", getProductsController);
 
+// Get available product statuses (must be before /:slug to avoid route conflict)
+router.get("/statuses", getProductStatusesController);
+
 // Admin routes (must come before /:slug to avoid conflicts)
 router.get("/admin/:id", verifyToken, isAdmin, getProductByIdController);
 
-// Delete and save routes
-router.delete("/:id/delete", verifyToken,deleteProductController );
+// Delete product (Admin only)
+router.delete("/:id/delete", verifyToken, isAdmin, deleteProductController);
 router.post("/:id/save",verifyToken,saveProductController);
 
 // Product detail routes

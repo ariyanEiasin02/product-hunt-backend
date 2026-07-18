@@ -23,13 +23,11 @@ const CommentSchema = new Schema<IComment>(
       type: Schema.Types.ObjectId,
       ref: "Product",
       required: [true, "Product ID is required"],
-      index: true,
     },
     user: {
       type: Schema.Types.ObjectId,
       ref: "User",
       required: [true, "User ID is required"],
-      index: true,
     },
     content: {
       type: String,
@@ -42,7 +40,6 @@ const CommentSchema = new Schema<IComment>(
       type: Schema.Types.ObjectId,
       ref: "Comment",
       default: null,
-      index: true,
     },
     replyCount: {
       type: Number,

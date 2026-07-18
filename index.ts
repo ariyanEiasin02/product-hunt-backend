@@ -46,7 +46,7 @@ const corsOptions = {
     // Allow all origins in development, or specific origins in production
     const allowedOrigins = process.env.ALLOWED_ORIGINS 
       ? process.env.ALLOWED_ORIGINS.split(',')
-      : ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000','https://product-hunt-admin.netlify.app','https://product-hunt-frontend.netlify.app'];
+      : ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000','product-hunt-admin.vercel.app','https://product-hunt-frontend-blush.vercel.app/','https://product-hunt-frontend.vercel.app/'];
     
     if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
       callback(null, true);
@@ -75,9 +75,19 @@ app.use("/api/uploads", express.static(uploadsPath));
 app.use(router);
 
 
-// Server listen
+// Server listen — gracefully handle EADDRINUSE
 server.listen(port, () => {
   console.log(
     `Product Hunt backend listening at http://localhost:${port}`
   );
+});
+
+server.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`Port ${port} is already in use. Please stop the existing process or use a different port.`);
+    process.exit(1);
+  } else {
+    console.error("Server error:", err.message);
+    process.exit(1);
+  }
 });

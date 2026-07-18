@@ -108,7 +108,7 @@ StorySchema.pre("save", function () {
 });
 
 // Indexes for performance
-StorySchema.index({ slug: 1 });
+// Note: slug index is already created by unique: true on the slug field
 StorySchema.index({ status: 1, publishedAt: -1 });
 StorySchema.index({ tags: 1 });
 StorySchema.index({ isFeatured: 1, publishedAt: -1 });
