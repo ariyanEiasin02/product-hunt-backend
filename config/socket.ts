@@ -16,13 +16,14 @@ export function initSocketIO(httpServer: HttpServer): Server {
   io = new Server(httpServer, {
     cors: {
       origin: process.env.ALLOWED_ORIGINS
-        ? process.env.ALLOWED_ORIGINS.split(",")
+        ? process.env.ALLOWED_ORIGINS.split(",").map(o => o.trim())
         : [
             "http://localhost:3000",
             "http://localhost:3001",
             "http://127.0.0.1:3000",
-            "https://product-hunt-admin.netlify.app",
-            "https://product-hunt-frontend.netlify.app",
+            "https://product-hunt-admin.vercel.app",
+            "https://product-hunt-frontend-blush.vercel.app",
+            "https://product-hunt-frontend.vercel.app",
           ],
       credentials: true,
       methods: ["GET", "POST"],
