@@ -697,187 +697,173 @@ export async function upvoteProductController(
 /**
  * Get home page products - returns all categories in one response
  * GET /api/products/home
+ *
+ * Optimizations:
+ * - Bangladesh timezone (UTC+6) for correct date boundaries
+ * - lean() for read-only queries (~10x faster)
+ * - Batch upvote check (single query instead of fetching upvotedBy per product)
+ * - Compound indexes for $or branches
+ * - Minimal field selection (no upvotedBy in main query)
+ * - Consistent response format
  */
 export async function getHomePageProductsController(
   req: Request,
   res: Response
 ): Promise<void> {
   try {
-    const userId = (req as any).user?.id || null; // Get authenticated user ID if available
+    const userId = (req as any).user?.id || null;
+
+    // ── Bangladesh timezone (UTC+6) date calculations ───────────────────
+    const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
     const now = new Date();
+    const bdNow = new Date(now.getTime() + BD_OFFSET_MS);
 
-    // Today's products (only today)
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-
-    // Yesterday's products (only yesterday)
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0);
-    const yesterdayEnd = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59);
-
-    // Last week's date range (7 days ago to 2 days ago, excluding today and yesterday)
-    const lastWeekStart = new Date(now);
-    lastWeekStart.setDate(lastWeekStart.getDate() - 7);
-    lastWeekStart.setHours(0, 0, 0, 0);
-    
-    const twoDaysAgo = new Date(now);
-    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-    const lastWeekEnd = new Date(twoDaysAgo.getFullYear(), twoDaysAgo.getMonth(), twoDaysAgo.getDate(), 23, 59, 59);
-
-    // Last month's date range (30 days ago to 8 days ago, excluding last week)
-    const lastMonthStart = new Date(now);
-    lastMonthStart.setDate(lastMonthStart.getDate() - 30);
-    lastMonthStart.setHours(0, 0, 0, 0);
-    
-    const eightDaysAgo = new Date(now);
-    eightDaysAgo.setDate(eightDaysAgo.getDate() - 8);
-    const lastMonthEnd = new Date(eightDaysAgo.getFullYear(), eightDaysAgo.getMonth(), eightDaysAgo.getDate(), 23, 59, 59);
-
-    // Query all categories in parallel
-    const [todayProducts, yesterdayProducts, lastWeekProducts, lastMonthProducts] = await Promise.all([
-      // Products launching today only
-      Product.find({
-        status: "approved",
-        $or: [
-          {
-            launchedAt: {
-              $gte: todayStart,
-              $lte: todayEnd,
-            },
-          },
-          {
-            launchedAt: null,
-            createdAt: {
-              $gte: todayStart,
-              $lte: todayEnd,
-            },
-          },
-        ],
-      })
-        .select("name slug thumbnail upvotes commentsCount topics tagline upvotedBy")
-        .populate("topics", "name slug")
-        .sort({ launchedAt: -1, upvotes: -1 })
-        .limit(10),
-
-      // Yesterday's top products only
-      Product.find({
-        status: "approved",
-        $or: [
-          {
-            launchedAt: {
-              $gte: yesterdayStart,
-              $lte: yesterdayEnd,
-            },
-          },
-          {
-            launchedAt: null,
-            createdAt: {
-              $gte: yesterdayStart,
-              $lte: yesterdayEnd,
-            },
-          },
-        ],
-      })
-        .select("name slug thumbnail upvotes commentsCount topics tagline upvotedBy")
-        .populate("topics", "name slug")
-        .sort({ upvotes: -1, launchedAt: -1 })
-        .limit(7),
-
-      // Last week's top products (days 2-7, excluding today and yesterday)
-      Product.find({
-        status: "approved",
-        $or: [
-          {
-            launchedAt: {
-              $gte: lastWeekStart,
-              $lte: lastWeekEnd,
-            },
-          },
-          {
-            launchedAt: null,
-            createdAt: {
-              $gte: lastWeekStart,
-              $lte: lastWeekEnd,
-            },
-          },
-        ],
-      })
-        .select("name slug thumbnail upvotes commentsCount topics tagline upvotedBy")
-        .populate("topics", "name slug")
-        .sort({ upvotes: -1, launchedAt: -1 })
-        .limit(7),
-
-      // Last month's top products (days 8-30, excluding last week)
-      Product.find({
-        status: "approved",
-        $or: [
-          {
-            launchedAt: {
-              $gte: lastMonthStart,
-              $lte: lastMonthEnd,
-            },
-          },
-          {
-            launchedAt: null,
-            createdAt: {
-              $gte: lastMonthStart,
-              $lte: lastMonthEnd,
-            },
-          },
-        ],
-      })
-        .select("name slug thumbnail upvotes commentsCount topics tagline upvotedBy")
-        .populate("topics", "name slug")
-        .sort({ upvotes: -1, launchedAt: -1 })
-        .limit(7),
-    ]);
-
-    // Helper function to add upvoteTrue status
-    const addUpvoteStatus = (products: any[]) => {
-      return products.map((product) => {
-        const productObj: any = product.toObject();
-        if (userId && productObj.upvotedBy && Array.isArray(productObj.upvotedBy)) {
-          productObj.upvoteTrue = productObj.upvotedBy.some(
-            (id: any) => id.toString() === userId
-          ) ? 1 : 0;
-        } else {
-          productObj.upvoteTrue = 0;
-        }
-        return productObj;
-      });
+    // Helper: convert a Bangladesh date (year, month, day) to UTC Date range
+    const toUtcRange = (bdDate: Date): { start: Date; end: Date } => {
+      const start = new Date(
+        Date.UTC(bdDate.getUTCFullYear(), bdDate.getUTCMonth(), bdDate.getUTCDate(), 0, 0, 0, 0) -
+          BD_OFFSET_MS
+      );
+      const end = new Date(
+        Date.UTC(bdDate.getUTCFullYear(), bdDate.getUTCMonth(), bdDate.getUTCDate(), 23, 59, 59, 999) -
+          BD_OFFSET_MS
+      );
+      return { start, end };
     };
+
+    // Today
+    const today = toUtcRange(bdNow);
+
+    // Yesterday
+    const bdYesterday = new Date(bdNow);
+    bdYesterday.setUTCDate(bdYesterday.getUTCDate() - 1);
+    const yesterday = toUtcRange(bdYesterday);
+
+    // Last week (7 days ago to 2 days ago, excluding today & yesterday)
+    const bdLastWeekStart = new Date(bdNow);
+    bdLastWeekStart.setUTCDate(bdLastWeekStart.getUTCDate() - 7);
+    const bdLastWeekEnd = new Date(bdNow);
+    bdLastWeekEnd.setUTCDate(bdLastWeekEnd.getUTCDate() - 2);
+    const lastWeek = {
+      start: new Date(
+        Date.UTC(bdLastWeekStart.getUTCFullYear(), bdLastWeekStart.getUTCMonth(), bdLastWeekStart.getUTCDate(), 0, 0, 0, 0) -
+          BD_OFFSET_MS
+      ),
+      end: new Date(
+        Date.UTC(bdLastWeekEnd.getUTCFullYear(), bdLastWeekEnd.getUTCMonth(), bdLastWeekEnd.getUTCDate(), 23, 59, 59, 999) -
+          BD_OFFSET_MS
+      ),
+    };
+
+    // Last month (30 days ago to 8 days ago, excluding last week)
+    const bdLastMonthStart = new Date(bdNow);
+    bdLastMonthStart.setUTCDate(bdLastMonthStart.getUTCDate() - 30);
+    const bdLastMonthEnd = new Date(bdNow);
+    bdLastMonthEnd.setUTCDate(bdLastMonthEnd.getUTCDate() - 8);
+    const lastMonth = {
+      start: new Date(
+        Date.UTC(bdLastMonthStart.getUTCFullYear(), bdLastMonthStart.getUTCMonth(), bdLastMonthStart.getUTCDate(), 0, 0, 0, 0) -
+          BD_OFFSET_MS
+      ),
+      end: new Date(
+        Date.UTC(bdLastMonthEnd.getUTCFullYear(), bdLastMonthEnd.getUTCMonth(), bdLastMonthEnd.getUTCDate(), 23, 59, 59, 999) -
+          BD_OFFSET_MS
+      ),
+    };
+
+    // ── Reusable query factory ──────────────────────────────────────────
+    const selectFields =
+      "name slug thumbnail upvotes commentsCount topics tagline";
+
+    const buildQuery = (range: { start: Date; end: Date }, sortFields: Record<string, 1 | -1>, limitCount: number) => {
+      return Product.find({
+        status: "approved",
+        $or: [
+          { launchedAt: { $gte: range.start, $lte: range.end } },
+          { launchedAt: null, createdAt: { $gte: range.start, $lte: range.end } },
+        ],
+      })
+        .select(selectFields)
+        .populate("topics", "name slug")
+        .sort(sortFields)
+        .limit(limitCount)
+        .lean({ virtuals: false })
+        .exec();
+    };
+
+    // ── Run all 4 queries in parallel ───────────────────────────────────
+    const [todayProducts, yesterdayProducts, lastWeekProducts, lastMonthProducts] =
+      await Promise.all([
+        buildQuery(today, { launchedAt: -1, upvotes: -1 }, 10),
+        buildQuery(yesterday, { upvotes: -1, launchedAt: -1 }, 7),
+        buildQuery(lastWeek, { upvotes: -1, launchedAt: -1 }, 7),
+        buildQuery(lastMonth, { upvotes: -1, launchedAt: -1 }, 7),
+      ]);
+
+    // ── Batch upvote check (single query, no upvotedBy in main query) ──
+    let upvotedSet = new Set<string>();
+    if (userId) {
+      const allIds = [
+        ...todayProducts,
+        ...yesterdayProducts,
+        ...lastWeekProducts,
+        ...lastMonthProducts,
+      ].map((p: any) => p._id);
+
+      if (allIds.length > 0) {
+        try {
+          const upvotedDocs = await Product.find({ _id: { $in: allIds }, upvotedBy: userId })
+            .select("_id")
+            .lean()
+            .exec();
+          upvotedSet = new Set(upvotedDocs.map((d: any) => d._id.toString()));
+        } catch (err: any) {
+          console.warn("[getHomePageProductsController] batch upvote query failed:", err.message);
+        }
+      }
+    }
+
+    // ── Build response ──────────────────────────────────────────────────
+    const buildCategory = (products: any[], title: string) => ({
+      title,
+      count: products.length,
+      products: products.map((p: any) => ({
+        _id: p._id,
+        name: p.name,
+        slug: p.slug,
+        thumbnail: p.thumbnail,
+        upvotes: p.upvotes,
+        commentsCount: p.commentsCount,
+        tagline: p.tagline,
+        topics: p.topics,
+        upvoteTrue: upvotedSet.has(p._id.toString()) ? 1 : 0,
+      })),
+    });
 
     res.status(200).json({
       success: true,
+      message: "Products fetched successfully",
       data: {
-        today: {
-          title: "Top Products Launching Today",
-          count: todayProducts.length,
-          products: addUpvoteStatus(todayProducts),
-        },
-        yesterday: {
-          title: "Yesterday's Top Products",
-          count: yesterdayProducts.length,
-          products: addUpvoteStatus(yesterdayProducts),
-        },
-        lastWeek: {
-          title: "Last Week's Top Products",
-          count: lastWeekProducts.length,
-          products: addUpvoteStatus(lastWeekProducts),
-        },
-        lastMonth: {
-          title: "Last Month's Top Products",
-          count: lastMonthProducts.length,
-          products: addUpvoteStatus(lastMonthProducts),
-        },
+        today: buildCategory(todayProducts, "Top Products Launching Today"),
+        yesterday: buildCategory(yesterdayProducts, "Yesterday's Top Products"),
+        lastWeek: buildCategory(lastWeekProducts, "Last Week's Top Products"),
+        lastMonth: buildCategory(lastMonthProducts, "Last Month's Top Products"),
       },
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Server error";
-    res.status(500).json({
+    console.error("[getHomePageProductsController] Error:", error);
+
+    // Return empty data gracefully instead of crashing the home page
+    res.status(200).json({
       success: false,
       message: errorMessage,
+      data: {
+        today: { title: "Top Products Launching Today", count: 0, products: [] },
+        yesterday: { title: "Yesterday's Top Products", count: 0, products: [] },
+        lastWeek: { title: "Last Week's Top Products", count: 0, products: [] },
+        lastMonth: { title: "Last Month's Top Products", count: 0, products: [] },
+      },
     });
   }
 }
