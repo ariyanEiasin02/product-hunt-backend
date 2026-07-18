@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import Product from "../models/productSchema.js";
 import Subcategory from "../models/subcategorySchema.js";
 import User from "../models/userSchema.js";
+import Story from "../models/storySchema.js";
 import { uploadToCloudinary, uploadMultipleToCloudinary, deleteByUrl } from "../utils/uploadToCloudinary.js";
 import { createNotification, upsertNotification, removeNotificationIfExists } from "./notificationController.js";
 
@@ -791,13 +792,22 @@ export async function getHomePageProductsController(
         .exec();
     };
 
-    // ── Run all 4 queries in parallel ───────────────────────────────────
-    const [todayProducts, yesterdayProducts, lastWeekProducts, lastMonthProducts] =
+    // ── Fetch recent published stories for home page sidebar ────────────
+    const recentStoriesQuery = Story.find({ status: "published" })
+      .select("title slug summary coverImage publishedAt readTime")
+      .sort({ publishedAt: -1 })
+      .limit(10)
+      .lean({ virtuals: false })
+      .exec();
+
+    // ── Run all 5 queries in parallel ───────────────────────────────────
+    const [todayProducts, yesterdayProducts, lastWeekProducts, lastMonthProducts, stories] =
       await Promise.all([
         buildQuery(today, { launchedAt: -1, upvotes: -1 }, 10),
         buildQuery(yesterday, { upvotes: -1, launchedAt: -1 }, 7),
         buildQuery(lastWeek, { upvotes: -1, launchedAt: -1 }, 7),
         buildQuery(lastMonth, { upvotes: -1, launchedAt: -1 }, 7),
+        recentStoriesQuery,
       ]);
 
     // ── Batch upvote check (single query, no upvotedBy in main query) ──
@@ -840,6 +850,17 @@ export async function getHomePageProductsController(
       })),
     });
 
+    // Map stories for the response
+    const mappedStories = stories.map((s: any) => ({
+      _id: s._id,
+      title: s.title,
+      slug: s.slug,
+      summary: s.summary,
+      coverImage: s.coverImage,
+      readTime: s.readTime,
+      publishedAt: s.publishedAt,
+    }));
+
     res.status(200).json({
       success: true,
       message: "Products fetched successfully",
@@ -848,6 +869,7 @@ export async function getHomePageProductsController(
         yesterday: buildCategory(yesterdayProducts, "Yesterday's Top Products"),
         lastWeek: buildCategory(lastWeekProducts, "Last Week's Top Products"),
         lastMonth: buildCategory(lastMonthProducts, "Last Month's Top Products"),
+        stories: mappedStories,
       },
     });
   } catch (error) {
@@ -863,6 +885,7 @@ export async function getHomePageProductsController(
         yesterday: { title: "Yesterday's Top Products", count: 0, products: [] },
         lastWeek: { title: "Last Week's Top Products", count: 0, products: [] },
         lastMonth: { title: "Last Month's Top Products", count: 0, products: [] },
+        stories: [],
       },
     });
   }
