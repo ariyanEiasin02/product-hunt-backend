@@ -16,6 +16,7 @@ import pagesRouter from "./pages.js";
 import faqsRouter from "./faqs.js";
 import productGuidesRouter from "./productGuides.js";
 import { getHomePageProductsController } from "../../controllers/productController.js";
+import { getLoyoutListController } from "../../controllers/footerController.js";
 import { optionalAuth } from "../../middleware/authMiddleware.js";
 
 const router = Router();
@@ -31,6 +32,7 @@ router.use("/stories", storiesRouter);
 router.use("/dashboard", dashboardRouter);
 router.use("/visit-streaks", visitStreakRouter);
 router.get("/home", optionalAuth, getHomePageProductsController);
+router.get("/footer", optionalAuth, getLoyoutListController);
 
 // notification route
 router.use("/notifications", notificationRouter);
