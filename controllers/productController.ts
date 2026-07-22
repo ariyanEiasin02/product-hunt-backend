@@ -796,7 +796,7 @@ export async function getHomePageProductsController(
     const recentStoriesQuery = Story.find({ status: "published" })
       .select("title slug summary coverImage publishedAt readTime")
       .sort({ publishedAt: -1 })
-      .limit(10)
+      .limit(7)
       .lean({ virtuals: false })
       .exec();
 
