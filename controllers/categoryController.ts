@@ -379,7 +379,6 @@ export async function getNavbarCategoriesController(
     });
   }
 }
-
 export async function getAllCategoriesSearchController(
   req: Request,
   res: Response
@@ -387,11 +386,12 @@ export async function getAllCategoriesSearchController(
   try {
     const categories = await Category.find({ status: "approved" })
       .select("_id name slug")
+      .limit(5)
       .populate({
         path: "subcategories",
         match: { status: "approved" },
         select: "_id name slug",
-        perDocumentLimit: 8,
+       perDocumentLimit: 6,
       });
 
     res.status(200).json({
@@ -402,12 +402,15 @@ export async function getAllCategoriesSearchController(
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Server error";
+
     res.status(500).json({
       success: false,
       message: errorMessage,
     });
   }
 }
+
+
 // Get category detail by slug with products
 export async function getCategoryBySlugController(
   req: Request,
