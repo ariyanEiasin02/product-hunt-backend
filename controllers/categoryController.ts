@@ -380,6 +380,34 @@ export async function getNavbarCategoriesController(
   }
 }
 
+export async function getAllCategoriesSearchController(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const categories = await Category.find({ status: "approved" })
+      .select("_id name slug")
+      .populate({
+        path: "subcategories",
+        match: { status: "approved" },
+        select: "_id name slug",
+        perDocumentLimit: 8,
+      });
+
+    res.status(200).json({
+      success: true,
+      message: "Approved categories fetched successfully",
+      data: categories,
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Server error";
+    res.status(500).json({
+      success: false,
+      message: errorMessage,
+    });
+  }
+}
 // Get category detail by slug with products
 export async function getCategoryBySlugController(
   req: Request,
