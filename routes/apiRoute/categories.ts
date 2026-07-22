@@ -14,6 +14,7 @@ import {
   getCategoryBySlugController,
   getApprovedSubcategoriesController,
   getNavbarCategoriesController,
+  getAllCategoriesSearchController,
   getCategoriesAndSubcategoriesForSelectController,
 } from "../../controllers/categoryController.js";
 import { isAdmin, verifyToken, optionalAuth } from "../../middleware/authMiddleware.js";
@@ -36,6 +37,7 @@ router.delete("/subcategoryDelete/:id", verifyToken, isAdmin, subcategoryDeleteC
 // all category and subcategory routes will be here
 router.get("/allCategories", allGetCategoriesController);
 router.get("/allNavCategories", getNavbarCategoriesController);
+router.get("/allCategoriesSearch", getAllCategoriesSearchController);
 
 // Get approved subcategories for product submission (topic selection)
 router.get("/approvedSubcategories", getApprovedSubcategoriesController);
