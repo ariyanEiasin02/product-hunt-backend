@@ -101,9 +101,9 @@ const ProductSchema = new Schema<IProduct>(
       required: [true, "At least one category is required"],
       validate: {
         validator: function (arr: mongoose.Types.ObjectId[]) {
-          return arr && arr.length > 0 && arr.length <= 3;
+          return arr && arr.length > 0;
         },
-        message: "Products must have between 1 and 3 categories",
+        message: "At least one category is required",
       },
     },
     pricingType: {
