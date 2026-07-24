@@ -3,6 +3,8 @@
 import { Request, Response } from "express";
 import mongoose from "mongoose";
 import Product from "../models/productSchema.js";
+import Subcategory from "../models/subcategorySchema.js";
+import Category from "../models/categorySchema.js";
 import User from "../models/userSchema.js";
 import Story from "../models/storySchema.js";
 import { uploadToCloudinary, uploadMultipleToCloudinary, deleteByUrl } from "../utils/uploadToCloudinary.js";
@@ -27,6 +29,54 @@ const STATUS_TRANSITIONS: Record<ProductStatus, ProductStatus[]> = {
   approved: [],  // Terminal state — once approved, cannot be changed
   rejected: ["pending", "approved"], // Can resubmit or admin can directly approve
 };
+
+/**
+ * Resolve topic IDs (category or subcategory) into subcategory IDs only.
+ * Category IDs get expanded to their approved subcategories.
+ */
+async function resolveTopicsToSubcategories(topicIds: string[]): Promise<mongoose.Types.ObjectId[]> {
+  // Find which IDs are subcategories
+  const subcategories = await Subcategory.find({
+    _id: { $in: topicIds },
+    status: "approved",
+  }).select("_id");
+
+  const resolvedIds: Set<string> = new Set(
+    subcategories.map((s) => s._id.toString())
+  );
+
+  // Find which IDs are categories and resolve their subcategories
+  const categoryIds = topicIds.filter((id) => !resolvedIds.has(id));
+
+  let categoryCount = 0;
+
+  if (categoryIds.length > 0) {
+    const categories = await Category.find({
+      _id: { $in: categoryIds },
+      status: "approved",
+    }).populate({
+      path: "subcategories",
+      match: { status: "approved" },
+      select: "_id",
+    });
+
+    categoryCount = categories.length;
+
+    for (const cat of categories) {
+      for (const sub of cat.subcategories || []) {
+        resolvedIds.add((sub as any)._id.toString());
+      }
+    }
+  }
+
+  // Warn if some input IDs could not be resolved
+  if (subcategories.length + categoryCount < topicIds.length) {
+    const skippedCount = topicIds.length - (subcategories.length + categoryCount);
+    console.warn(`[resolveTopicsToSubcategories] ${skippedCount} topic ID(s) not found in approved categories or subcategories`);
+  }
+
+  return Array.from(resolvedIds).map((id) => new mongoose.Types.ObjectId(id));
+}
 
 export async function createProductController(
   req: Request,
@@ -112,7 +162,7 @@ export async function createProductController(
       return;
     }
 
-    // Validate topics (required, max 3)
+    // Validate topics (required, max 3 input selections)
     if (!topics || !Array.isArray(topics) || topics.length === 0) {
       res.status(400).json({
         success: false,
@@ -142,6 +192,17 @@ export async function createProductController(
       res.status(400).json({
         success: false,
         message: "Tagline cannot exceed 60 characters",
+      });
+      return;
+    }
+
+    // Resolve topics: expand category IDs to their subcategory IDs for DB storage
+    const resolvedTopics = await resolveTopicsToSubcategories(topics);
+
+    if (resolvedTopics.length === 0) {
+      res.status(400).json({
+        success: false,
+        message: "No valid categories/subcategories found. Please select approved categories.",
       });
       return;
     }
@@ -190,7 +251,7 @@ export async function createProductController(
       gallery: gallery || [],
       firstComment,
       makers: makers,
-      topics: topics,
+      topics: resolvedTopics,
       pricingType,
       isOpenSource: isOpenSource || false,
       isAiProduct: isAiProduct || false,
@@ -1142,7 +1203,11 @@ export async function updateProductController(
     if (gallery !== undefined) product.gallery = gallery;
     if (firstComment !== undefined) product.firstComment = firstComment;
     if (makers) product.makers = makers;
-    if (topics) product.topics = topics;
+    // Resolve topics: expand category IDs to subcategory IDs
+    if (topics && Array.isArray(topics) && topics.length > 0) {
+      const resolvedTopics = await resolveTopicsToSubcategories(topics);
+      product.topics = resolvedTopics;
+    }
     if (pricingType !== undefined) product.pricingType = pricingType;
     if (isOpenSource !== undefined) product.isOpenSource = isOpenSource === 'true' || isOpenSource === true;
     if (isAiProduct !== undefined) product.isAiProduct = isAiProduct === 'true' || isAiProduct === true;
@@ -1332,6 +1397,17 @@ export async function createProductCloudinaryController(
       return;
     }
 
+    // Resolve topics: expand category IDs to their subcategory IDs for DB storage
+    const resolvedTopics = await resolveTopicsToSubcategories(topics);
+
+    if (resolvedTopics.length === 0) {
+      res.status(400).json({
+        success: false,
+        message: "No valid categories/subcategories found. Please select approved categories.",
+      });
+      return;
+    }
+
     // Validate makers exist
     const validMakers = await User.find({ _id: { $in: makers } });
     if (validMakers.length !== makers.length) {
@@ -1371,7 +1447,7 @@ export async function createProductCloudinaryController(
       gallery: gallery || [],
       firstComment,
       makers,
-      topics: topics,
+      topics: resolvedTopics,
       pricingType,
       isOpenSource: isOpenSource || false,
       isAiProduct: isAiProduct || false,
@@ -1500,7 +1576,11 @@ export async function updateProductCloudinaryController(
     if (gallery !== undefined) product.gallery = gallery;
     if (firstComment !== undefined) product.firstComment = firstComment;
     if (makers) product.makers = makers;
-    if (topics) product.topics = topics;
+    // Resolve topics: expand category IDs to subcategory IDs
+    if (topics && Array.isArray(topics) && topics.length > 0) {
+      const resolvedTopics = await resolveTopicsToSubcategories(topics);
+      product.topics = resolvedTopics;
+    }
     if (pricingType !== undefined) product.pricingType = pricingType;
     if (isOpenSource !== undefined) product.isOpenSource = isOpenSource === 'true' || isOpenSource === true;
     if (isAiProduct !== undefined) product.isAiProduct = isAiProduct === 'true' || isAiProduct === true;
