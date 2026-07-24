@@ -4,6 +4,7 @@ import { Request, Response } from "express";
 import mongoose from "mongoose";
 import Product from "../models/productSchema.js";
 import Subcategory from "../models/subcategorySchema.js";
+import Category from "../models/categorySchema.js";
 import User from "../models/userSchema.js";
 import Story from "../models/storySchema.js";
 import { uploadToCloudinary, uploadMultipleToCloudinary, deleteByUrl } from "../utils/uploadToCloudinary.js";
@@ -28,6 +29,60 @@ const STATUS_TRANSITIONS: Record<ProductStatus, ProductStatus[]> = {
   approved: [],  // Terminal state — once approved, cannot be changed
   rejected: ["pending", "approved"], // Can resubmit or admin can directly approve
 };
+
+/**
+ * Helper: Resolve topic IDs (can be category or subcategory IDs) into subcategory IDs only.
+ * - If an ID is a subcategory, it's used directly.
+ * - If an ID is a category, all its approved subcategories are resolved.
+ * Returns a deduplicated array of subcategory ObjectIds.
+ */
+async function resolveTopicsToSubcategories(topicIds: string[]): Promise<mongoose.Types.ObjectId[]> {
+  // Track how many input IDs were successfully found (for warning)
+  let foundCount = 0;
+
+  // Find which IDs are subcategories
+  const subcategories = await Subcategory.find({
+    _id: { $in: topicIds },
+    status: "approved",
+  }).select("_id");
+
+  const resolvedIds: Set<string> = new Set(
+    subcategories.map((s) => s._id.toString())
+  );
+  foundCount += subcategories.length;
+
+  // Find which IDs are categories and resolve their subcategories
+  const categoryIds = topicIds.filter(
+    (id) => !resolvedIds.has(id)
+  );
+
+  if (categoryIds.length > 0) {
+    const categories = await Category.find({
+      _id: { $in: categoryIds },
+      status: "approved",
+    }).populate({
+      path: "subcategories",
+      match: { status: "approved" },
+      select: "_id",
+    });
+
+    foundCount += categories.length;
+
+    for (const cat of categories) {
+      for (const sub of cat.subcategories || []) {
+        resolvedIds.add((sub as any)._id.toString());
+      }
+    }
+  }
+
+  // Warn if some input IDs could not be resolved (neither subcategory nor category)
+  if (foundCount < topicIds.length) {
+    const skippedCount = topicIds.length - foundCount;
+    console.warn(`[resolveTopicsToSubcategories] ${skippedCount} topic ID(s) could not be resolved (not found in approved subcategories or categories)`);
+  }
+
+  return Array.from(resolvedIds).map((id) => new mongoose.Types.ObjectId(id));
+}
 
 export async function createProductController(
   req: Request,
@@ -147,16 +202,21 @@ export async function createProductController(
       return;
     }
 
-    // Validate topics exist and are approved
-    const validTopics = await Subcategory.find({
-      _id: { $in: topics },
-      status: "approved",
-    });
+    // Resolve topics: accept both category and subcategory IDs, store only subcategory IDs
+    const resolvedTopics = await resolveTopicsToSubcategories(topics);
 
-    if (validTopics.length !== topics.length) {
+    if (resolvedTopics.length === 0) {
       res.status(400).json({
         success: false,
-        message: "One or more categories are invalid or not approved",
+        message: "No valid categories or subcategories found. Please select approved categories.",
+      });
+      return;
+    }
+
+    if (resolvedTopics.length > 3) {
+      res.status(400).json({
+        success: false,
+        message: "Maximum 3 categories allowed after resolving parent categories",
       });
       return;
     }
@@ -205,7 +265,7 @@ export async function createProductController(
       gallery: gallery || [],
       firstComment,
       makers: makers,
-      topics: topics,
+      topics: resolvedTopics,
       pricingType,
       isOpenSource: isOpenSource || false,
       isAiProduct: isAiProduct || false,
@@ -1157,7 +1217,18 @@ export async function updateProductController(
     if (gallery !== undefined) product.gallery = gallery;
     if (firstComment !== undefined) product.firstComment = firstComment;
     if (makers) product.makers = makers;
-    if (topics) product.topics = topics;
+    // Resolve topics: accept both category and subcategory IDs, store only subcategory IDs
+    if (topics && Array.isArray(topics) && topics.length > 0) {
+      const resolvedTopics = await resolveTopicsToSubcategories(topics);
+      if (resolvedTopics.length > 3) {
+        res.status(400).json({
+          success: false,
+          message: "Maximum 3 categories allowed after resolving parent categories",
+        });
+        return;
+      }
+      product.topics = resolvedTopics;
+    }
     if (pricingType !== undefined) product.pricingType = pricingType;
     if (isOpenSource !== undefined) product.isOpenSource = isOpenSource === 'true' || isOpenSource === true;
     if (isAiProduct !== undefined) product.isAiProduct = isAiProduct === 'true' || isAiProduct === true;
@@ -1347,16 +1418,21 @@ export async function createProductCloudinaryController(
       return;
     }
 
-    // Validate topics exist and are approved
-    const validTopics = await Subcategory.find({
-      _id: { $in: topics },
-      status: "approved",
-    });
+    // Resolve topics: accept both category and subcategory IDs, store only subcategory IDs
+    const resolvedTopics = await resolveTopicsToSubcategories(topics);
 
-    if (validTopics.length !== topics.length) {
+    if (resolvedTopics.length === 0) {
       res.status(400).json({
         success: false,
-        message: "One or more categories are invalid or not approved",
+        message: "No valid categories or subcategories found. Please select approved categories.",
+      });
+      return;
+    }
+
+    if (resolvedTopics.length > 3) {
+      res.status(400).json({
+        success: false,
+        message: "Maximum 3 categories allowed after resolving parent categories",
       });
       return;
     }
@@ -1400,7 +1476,7 @@ export async function createProductCloudinaryController(
       gallery: gallery || [],
       firstComment,
       makers,
-      topics,
+      topics: resolvedTopics,
       pricingType,
       isOpenSource: isOpenSource || false,
       isAiProduct: isAiProduct || false,
@@ -1529,7 +1605,18 @@ export async function updateProductCloudinaryController(
     if (gallery !== undefined) product.gallery = gallery;
     if (firstComment !== undefined) product.firstComment = firstComment;
     if (makers) product.makers = makers;
-    if (topics) product.topics = topics;
+    // Resolve topics: accept both category and subcategory IDs, store only subcategory IDs
+    if (topics && Array.isArray(topics) && topics.length > 0) {
+      const resolvedTopics = await resolveTopicsToSubcategories(topics);
+      if (resolvedTopics.length > 3) {
+        res.status(400).json({
+          success: false,
+          message: "Maximum 3 categories allowed after resolving parent categories",
+        });
+        return;
+      }
+      product.topics = resolvedTopics;
+    }
     if (pricingType !== undefined) product.pricingType = pricingType;
     if (isOpenSource !== undefined) product.isOpenSource = isOpenSource === 'true' || isOpenSource === true;
     if (isAiProduct !== undefined) product.isAiProduct = isAiProduct === 'true' || isAiProduct === true;
