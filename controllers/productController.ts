@@ -168,7 +168,7 @@ export async function createProductController(
       return;
     }
 
-    // Validate topics (required, 1-3)
+    // Validate topics (required, max 3 selections - can be categories or subcategories)
     if (!topics || !Array.isArray(topics) || topics.length === 0) {
       res.status(400).json({
         success: false,
@@ -180,7 +180,7 @@ export async function createProductController(
     if (topics.length > 3) {
       res.status(400).json({
         success: false,
-        message: "Maximum 3 categories allowed",
+        message: "Maximum 3 categories/subcategories allowed",
       });
       return;
     }
@@ -209,14 +209,6 @@ export async function createProductController(
       res.status(400).json({
         success: false,
         message: "No valid categories or subcategories found. Please select approved categories.",
-      });
-      return;
-    }
-
-    if (resolvedTopics.length > 3) {
-      res.status(400).json({
-        success: false,
-        message: "Maximum 3 categories allowed after resolving parent categories",
       });
       return;
     }
@@ -1220,13 +1212,6 @@ export async function updateProductController(
     // Resolve topics: accept both category and subcategory IDs, store only subcategory IDs
     if (topics && Array.isArray(topics) && topics.length > 0) {
       const resolvedTopics = await resolveTopicsToSubcategories(topics);
-      if (resolvedTopics.length > 3) {
-        res.status(400).json({
-          success: false,
-          message: "Maximum 3 categories allowed after resolving parent categories",
-        });
-        return;
-      }
       product.topics = resolvedTopics;
     }
     if (pricingType !== undefined) product.pricingType = pricingType;
@@ -1397,7 +1382,7 @@ export async function createProductCloudinaryController(
     if (topics.length > 3) {
       res.status(400).json({
         success: false,
-        message: "Maximum 3 categories allowed",
+        message: "Maximum 3 categories/subcategories allowed",
       });
       return;
     }
@@ -1425,14 +1410,6 @@ export async function createProductCloudinaryController(
       res.status(400).json({
         success: false,
         message: "No valid categories or subcategories found. Please select approved categories.",
-      });
-      return;
-    }
-
-    if (resolvedTopics.length > 3) {
-      res.status(400).json({
-        success: false,
-        message: "Maximum 3 categories allowed after resolving parent categories",
       });
       return;
     }
@@ -1608,13 +1585,6 @@ export async function updateProductCloudinaryController(
     // Resolve topics: accept both category and subcategory IDs, store only subcategory IDs
     if (topics && Array.isArray(topics) && topics.length > 0) {
       const resolvedTopics = await resolveTopicsToSubcategories(topics);
-      if (resolvedTopics.length > 3) {
-        res.status(400).json({
-          success: false,
-          message: "Maximum 3 categories allowed after resolving parent categories",
-        });
-        return;
-      }
       product.topics = resolvedTopics;
     }
     if (pricingType !== undefined) product.pricingType = pricingType;
