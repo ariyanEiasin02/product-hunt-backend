@@ -31,10 +31,15 @@ const STATUS_TRANSITIONS: Record<ProductStatus, ProductStatus[]> = {
 };
 
 /**
- * Resolve topic IDs (category or subcategory) into subcategory IDs only.
- * Category IDs get expanded to their approved subcategories.
+ * Helper: Resolve topic IDs (can be category or subcategory IDs) into subcategory IDs only.
+ * - If an ID is a subcategory, it's used directly.
+ * - If an ID is a category, all its approved subcategories are resolved.
+ * Returns a deduplicated array of subcategory ObjectIds.
  */
 async function resolveTopicsToSubcategories(topicIds: string[]): Promise<mongoose.Types.ObjectId[]> {
+  // Track how many input IDs were successfully found (for warning)
+  let foundCount = 0;
+
   // Find which IDs are subcategories
   const subcategories = await Subcategory.find({
     _id: { $in: topicIds },
@@ -44,11 +49,12 @@ async function resolveTopicsToSubcategories(topicIds: string[]): Promise<mongoos
   const resolvedIds: Set<string> = new Set(
     subcategories.map((s) => s._id.toString())
   );
+  foundCount += subcategories.length;
 
   // Find which IDs are categories and resolve their subcategories
-  const categoryIds = topicIds.filter((id) => !resolvedIds.has(id));
-
-  let categoryCount = 0;
+  const categoryIds = topicIds.filter(
+    (id) => !resolvedIds.has(id)
+  );
 
   if (categoryIds.length > 0) {
     const categories = await Category.find({
@@ -60,7 +66,7 @@ async function resolveTopicsToSubcategories(topicIds: string[]): Promise<mongoos
       select: "_id",
     });
 
-    categoryCount = categories.length;
+    foundCount += categories.length;
 
     for (const cat of categories) {
       for (const sub of cat.subcategories || []) {
@@ -69,10 +75,10 @@ async function resolveTopicsToSubcategories(topicIds: string[]): Promise<mongoos
     }
   }
 
-  // Warn if some input IDs could not be resolved
-  if (subcategories.length + categoryCount < topicIds.length) {
-    const skippedCount = topicIds.length - (subcategories.length + categoryCount);
-    console.warn(`[resolveTopicsToSubcategories] ${skippedCount} topic ID(s) not found in approved categories or subcategories`);
+  // Warn if some input IDs could not be resolved (neither subcategory nor category)
+  if (foundCount < topicIds.length) {
+    const skippedCount = topicIds.length - foundCount;
+    console.warn(`[resolveTopicsToSubcategories] ${skippedCount} topic ID(s) could not be resolved (not found in approved subcategories or categories)`);
   }
 
   return Array.from(resolvedIds).map((id) => new mongoose.Types.ObjectId(id));
@@ -162,11 +168,11 @@ export async function createProductController(
       return;
     }
 
-    // Validate topics (required, max 3 input selections)
+    // Validate topics (required, 1-3)
     if (!topics || !Array.isArray(topics) || topics.length === 0) {
       res.status(400).json({
         success: false,
-        message: "At least one category/subcategory is required",
+        message: "At least one category is required",
       });
       return;
     }
@@ -174,7 +180,7 @@ export async function createProductController(
     if (topics.length > 3) {
       res.status(400).json({
         success: false,
-        message: "Maximum 3 categories/subcategories allowed",
+        message: "Maximum 3 categories allowed",
       });
       return;
     }
@@ -196,13 +202,21 @@ export async function createProductController(
       return;
     }
 
-    // Resolve topics: expand category IDs to their subcategory IDs for DB storage
+    // Resolve topics: accept both category and subcategory IDs, store only subcategory IDs
     const resolvedTopics = await resolveTopicsToSubcategories(topics);
 
     if (resolvedTopics.length === 0) {
       res.status(400).json({
         success: false,
-        message: "No valid categories/subcategories found. Please select approved categories.",
+        message: "No valid categories or subcategories found. Please select approved categories.",
+      });
+      return;
+    }
+
+    if (resolvedTopics.length > 3) {
+      res.status(400).json({
+        success: false,
+        message: "Maximum 3 categories allowed after resolving parent categories",
       });
       return;
     }
@@ -1203,9 +1217,16 @@ export async function updateProductController(
     if (gallery !== undefined) product.gallery = gallery;
     if (firstComment !== undefined) product.firstComment = firstComment;
     if (makers) product.makers = makers;
-    // Resolve topics: expand category IDs to subcategory IDs
+    // Resolve topics: accept both category and subcategory IDs, store only subcategory IDs
     if (topics && Array.isArray(topics) && topics.length > 0) {
       const resolvedTopics = await resolveTopicsToSubcategories(topics);
+      if (resolvedTopics.length > 3) {
+        res.status(400).json({
+          success: false,
+          message: "Maximum 3 categories allowed after resolving parent categories",
+        });
+        return;
+      }
       product.topics = resolvedTopics;
     }
     if (pricingType !== undefined) product.pricingType = pricingType;
@@ -1368,7 +1389,7 @@ export async function createProductCloudinaryController(
     if (!topics || !Array.isArray(topics) || topics.length === 0) {
       res.status(400).json({
         success: false,
-        message: "At least one category/subcategory is required",
+        message: "At least one category is required",
       });
       return;
     }
@@ -1376,7 +1397,7 @@ export async function createProductCloudinaryController(
     if (topics.length > 3) {
       res.status(400).json({
         success: false,
-        message: "Maximum 3 categories/subcategories allowed",
+        message: "Maximum 3 categories allowed",
       });
       return;
     }
@@ -1397,13 +1418,21 @@ export async function createProductCloudinaryController(
       return;
     }
 
-    // Resolve topics: expand category IDs to their subcategory IDs for DB storage
+    // Resolve topics: accept both category and subcategory IDs, store only subcategory IDs
     const resolvedTopics = await resolveTopicsToSubcategories(topics);
 
     if (resolvedTopics.length === 0) {
       res.status(400).json({
         success: false,
-        message: "No valid categories/subcategories found. Please select approved categories.",
+        message: "No valid categories or subcategories found. Please select approved categories.",
+      });
+      return;
+    }
+
+    if (resolvedTopics.length > 3) {
+      res.status(400).json({
+        success: false,
+        message: "Maximum 3 categories allowed after resolving parent categories",
       });
       return;
     }
@@ -1576,9 +1605,16 @@ export async function updateProductCloudinaryController(
     if (gallery !== undefined) product.gallery = gallery;
     if (firstComment !== undefined) product.firstComment = firstComment;
     if (makers) product.makers = makers;
-    // Resolve topics: expand category IDs to subcategory IDs
+    // Resolve topics: accept both category and subcategory IDs, store only subcategory IDs
     if (topics && Array.isArray(topics) && topics.length > 0) {
       const resolvedTopics = await resolveTopicsToSubcategories(topics);
+      if (resolvedTopics.length > 3) {
+        res.status(400).json({
+          success: false,
+          message: "Maximum 3 categories allowed after resolving parent categories",
+        });
+        return;
+      }
       product.topics = resolvedTopics;
     }
     if (pricingType !== undefined) product.pricingType = pricingType;
