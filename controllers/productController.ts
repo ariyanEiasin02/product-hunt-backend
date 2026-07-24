@@ -26,8 +26,8 @@ export const PRODUCT_STATUS_INFO: Record<ProductStatus, { label: string; descrip
 const STATUS_TRANSITIONS: Record<ProductStatus, ProductStatus[]> = {
   draft:    ["pending", "approved", "rejected"],
   pending:  ["approved", "rejected"],
-  approved: [],  // Terminal state — once approved, cannot be changed
-  rejected: ["pending", "approved"], // Can resubmit or admin can directly approve
+  approved: ["pending", "rejected"],  // Admin can revert approval
+  rejected: ["pending", "approved"],  // Can resubmit or admin can directly approve
 };
 
 /**
