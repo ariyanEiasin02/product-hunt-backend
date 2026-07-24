@@ -98,12 +98,12 @@ const ProductSchema = new Schema<IProduct>(
     topics: {
       type: [Schema.Types.ObjectId],
       ref: "Subcategory",
-      required: [true, "At least one category is required"],
+      required: [true, "At least one category/subcategory is required"],
       validate: {
         validator: function (arr: mongoose.Types.ObjectId[]) {
-          return arr && arr.length > 0;
+          return arr && arr.length > 0 && arr.length <= 3;
         },
-        message: "At least one category is required",
+        message: "Select between 1 and 3 categories/subcategories",
       },
     },
     pricingType: {
