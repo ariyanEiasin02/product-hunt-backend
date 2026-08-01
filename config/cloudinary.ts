@@ -17,8 +17,6 @@ export function initCloudinary(): void {
     console.error(
       "[Cloudinary] Ensure .env file has CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET set"
     );
-  } else {
-    console.log("[Cloudinary] Initialized with cloud name:", cloudName);
   }
 
   cloudinary.config({
