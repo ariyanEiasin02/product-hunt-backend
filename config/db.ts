@@ -1,42 +1,76 @@
 import mongoose from "mongoose";
 
 const connectDB = async (): Promise<void> => {
-  try {
-    const mongoURI = process.env.MONGO_URI || "";
+  const mongoURI = process.env.MONGO_URI || "";
 
-    // ── Production-optimised connection pool ──────────────────────────────
-    // minPoolSize:  Keeps 5 connections alive after idle, avoiding TLS
-    //               handshake overhead on every burst of requests.
-    // maxPoolSize:  Caps concurrent connections to MongoDB Atlas to prevent
-    //               overwhelming the free-tier M0 cluster.
-    // serverSelectionTimeoutMS:  Fail fast (5s) — don't let a hung DNS/
-    //               network request tie up a serverless/Render process.
-    // socketTimeoutMS:  Close sockets that stall for 45s (e.g. during a
-    //               slow aggregation).    // heartbeartFrequencyMS: (default 10s) Keep-alive pings to detect
-    // replica-set changes quickly.
-    await mongoose.connect(mongoURI, {
-      minPoolSize: 5,
-      maxPoolSize: 20,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
-    });
+  // Fail fast on queries while the DB is unreachable instead of buffering
+  // them indefinitely. Buffered ops hang the request forever, which makes
+  // the client's TCP connection idle until the proxy/browser gives up →
+  // Axios "Network Error" / net::ERR_CONNECTION_CLOSED.
+  mongoose.set("bufferCommands", false);
 
-    console.log(`Connected to Database: ${mongoose.connection.name}`);
+  if (!mongoURI) {
+    console.error(
+      "[MongoDB] MONGO_URI is not set — API will return 500s until it is configured in Render env vars."
+    );
+    return;
+  }
 
-    // Log pool stats when a connection is created / destroyed (useful for
-    // monitoring in production)
-    mongoose.connection.on("connected", () => {
-      console.log("[MongoDB] Connection established");
-    });
-    mongoose.connection.on("error", (err) => {
-      console.error("[MongoDB] Runtime error:", err);
-    });
-    mongoose.connection.on("disconnected", () => {
-      console.warn("[MongoDB] Disconnected — will auto-reconnect");
-    });
-  } catch (error) {
-    console.error("MongoDB connection error:", error);
-    process.exit(1);
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    try {
+      // ── Production-optimised connection pool ──────────────────────────────
+      // minPoolSize:  Keeps 5 connections alive after idle, avoiding TLS
+      //               handshake overhead on every burst of requests.
+      // maxPoolSize:  Caps concurrent connections to MongoDB Atlas to prevent
+      //               overwhelming the free-tier M0 cluster.
+      // serverSelectionTimeoutMS:  Fail fast (5s) — don't let a hung DNS/
+      //               network request tie up a serverless/Render process.
+      // socketTimeoutMS:  Close sockets that stall for 45s (e.g. during a
+      //               slow aggregation).
+      await mongoose.connect(mongoURI, {
+        minPoolSize: 5,
+        maxPoolSize: 20,
+        serverSelectionTimeoutMS: 5000,
+        socketTimeoutMS: 45000,
+      });
+
+      console.log(`Connected to Database: ${mongoose.connection.name}`);
+
+      // Log pool stats when a connection is created / destroyed (useful for
+      // monitoring in production)
+      mongoose.connection.on("connected", () => {
+        console.log("[MongoDB] Connection established");
+      });
+      mongoose.connection.on("error", (err) => {
+        console.error("[MongoDB] Runtime error:", err);
+      });
+      mongoose.connection.on("disconnected", () => {
+        console.warn("[MongoDB] Disconnected — will auto-reconnect");
+      });
+      return;
+    } catch (error) {
+      // A malformed URI (e.g. MongoParseError) will never recover — log once
+      // and stop retrying so the logs aren't spammed forever.
+      if (error instanceof Error && error.name === "MongoParseError") {
+        console.error(
+          "[MongoDB] MONGO_URI is invalid — fix it in Render env vars:",
+          error.message
+        );
+        return;
+      }
+      // Transient failure (network, Atlas hiccup): never process.exit() —
+      // that kills the whole API and closes every in-flight connection.
+      // Instead log and retry with backoff; the server stays up and requests
+      // fail fast with a JSON 500 until MongoDB is reachable again.
+      const delay = Math.min(1000 * attempt, 10000);
+      console.error(
+        `MongoDB connection error (attempt ${attempt}), retrying in ${delay}ms:`,
+        error
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
   }
 };
 

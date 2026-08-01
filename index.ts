@@ -1,9 +1,10 @@
-import express, { Application} from "express";
+import express, { Application, NextFunction, Request, Response } from "express";
 import http from "http";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import mongoose from "mongoose";
 import connectDB from "./config/db.js";
 import router from "./routes/index.js";
 import { createUploadDirectories } from "./utils/fileUploadHelper.js";
@@ -16,6 +17,19 @@ const __dirname = path.dirname(__filename);
 
 // Load environment variables
 dotenv.config();
+
+// ── Process-level crash guards ──────────────────────────────────────────────
+// Without these, a single unhandled promise rejection or uncaught exception
+// (e.g. a flaky third-party call, a bad cast, a socket error) kills the whole
+// Node process. When the process dies, every in-flight request has its TCP
+// connection closed before a response is sent — clients see Axios "Network
+// Error" / net::ERR_CONNECTION_CLOSED. Log loudly but keep serving.
+process.on("unhandledRejection", (reason: unknown) => {
+  console.error("[process] Unhandled promise rejection:", reason);
+});
+process.on("uncaughtException", (err: Error) => {
+  console.error("[process] Uncaught exception:", err);
+});
 
 // Initialize Cloudinary with credentials from .env
 initCloudinary();
@@ -78,8 +92,42 @@ const uploadsPath = path.resolve(process.cwd(), "uploads");
 app.use("/uploads", express.static(uploadsPath));
 app.use("/api/uploads", express.static(uploadsPath));
 
+// Health check — lets Render / uptime monitors (UptimeRobot etc.) ping a
+// cheap endpoint instead of a heavy one, and proves the process is alive.
+app.get("/health", (_req: Request, res: Response) => {
+  res.status(200).json({
+    status: "ok",
+    uptime: process.uptime(),
+    db: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+  });
+});
+
 // Use routes
 app.use(router);
+
+// 404 handler — always answer with JSON so clients never get a hung/empty
+// connection when they hit an unknown route.
+app.use((req: Request, res: Response) => {
+  res.status(404).json({
+    success: false,
+    message: `Route not found: ${req.method} ${req.originalUrl}`,
+  });
+});
+
+// Global error middleware — Express 5 forwards errors thrown/rejected in
+// route handlers here. Return a clean JSON error instead of crashing the app.
+app.use((err: Error, _req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) {
+    return next(err);
+  }
+  console.error("[error] Unhandled error in request:", err);
+  // Preserve body-parser error statuses (400 bad JSON, 413 payload too large)
+  const status = (err as any).status || (err as any).statusCode || 500;
+  res.status(status).json({
+    success: false,
+    message: err.message || "Server error",
+  });
+});
 
 
 // Server listen — gracefully handle EADDRINUSE
@@ -88,6 +136,12 @@ server.listen(port, () => {
     `Product Hunt backend listening at http://localhost:${port}`
   );
 });
+
+// Keep-alive tweaks for Render's proxy. Node's defaults (5s keep-alive,
+// 60s headers) are shorter than Render's proxy idle timeout, which can make
+// the proxy drop an idle-but-open connection mid-request (ERR_CONNECTION_CLOSED).
+server.keepAliveTimeout = 120_000; // 120s
+server.headersTimeout = 121_000;   // must be > keepAliveTimeout
 
 server.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EADDRINUSE") {
