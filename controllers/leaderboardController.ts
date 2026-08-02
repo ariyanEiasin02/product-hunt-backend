@@ -146,34 +146,36 @@ export async function getLeaderboardController(
         ? { upvotes: -1, commentsCount: -1, launchedAt: -1, createdAt: -1 }
         : { launchedAt: -1, createdAt: -1, upvotes: -1 };
 
+    // lean() + never load the potentially large upvotedBy array.
     const [products, totalCount] = await Promise.all([
       Product.find(matchQuery)
-        .select("name slug tagline thumbnail upvotes commentsCount topics upvotedBy launchedAt createdAt")
+        .select("name slug tagline thumbnail upvotes commentsCount topics launchedAt createdAt")
         .populate("topics", "name slug")
         .sort(sortCriteria)
         .skip(skip)
-        .limit(limitNum),
+        .limit(limitNum)
+        .lean()
+        .exec(),
       Product.countDocuments(matchQuery),
     ]);
 
-    // Add rank and upvoteTrue flag
-    const rankedProducts = products.map((product, index) => {
-      const productObj = product.toObject();
-      return {
-        ...productObj,
-        rank: skip + index + 1,
-        upvoteTrue: userId
-          ? productObj.upvotedBy?.some(
-              (id: any) => id.toString() === userId
-            )
-            ? 1
-            : 0
-          : 0,
-      };
-    });
+    // Batch upvote check — single indexed query instead of per-product arrays.
+    let upvotedSet = new Set<string>();
+    if (userId && products.length > 0) {
+      const ids = products.map((p: any) => p._id);
+      const upvotedDocs = await Product.find({ _id: { $in: ids }, upvotedBy: userId })
+        .select("_id")
+        .lean()
+        .exec();
+      upvotedSet = new Set(upvotedDocs.map((d: any) => d._id.toString()));
+    }
 
-    // Remove upvotedBy from response (it can be large)
-    rankedProducts.forEach((p: any) => delete p.upvotedBy);
+    // Add rank and upvoteTrue flag
+    const rankedProducts = products.map((product: any, index) => ({
+      ...product,
+      rank: skip + index + 1,
+      upvoteTrue: upvotedSet.has(product._id.toString()) ? 1 : 0,
+    }));
 
     res.status(200).json({
       success: true,

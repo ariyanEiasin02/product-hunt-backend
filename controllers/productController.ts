@@ -9,6 +9,7 @@ import User from "../models/userSchema.js";
 import Story from "../models/storySchema.js";
 import { uploadToCloudinary, uploadMultipleToCloudinary, deleteByUrl } from "../utils/uploadToCloudinary.js";
 import { createNotification, upsertNotification, removeNotificationIfExists } from "./notificationController.js";
+import { getOrSet, cacheDelPrefix } from "../utils/cache.js";
 
 // ── Product status constants ─────────────────────────────────────────────
 export const PRODUCT_STATUSES = ["draft", "pending", "approved", "rejected"] as const;
@@ -287,6 +288,8 @@ export async function createProductController(
       .populate("makers", "fullname email")
       .populate("topics", "name slug");
 
+    cacheDelPrefix("home:");
+
     res.status(201).json({
       success: true,
       message: "Product submitted successfully",
@@ -337,16 +340,19 @@ export async function getProductsController(
     if (pricingType) filter.pricingType = pricingType;
     if (isAiProduct !== undefined) filter.isAiProduct = isAiProduct === "true";
 
-    // ── Fetch products (lean for performance) ──────────────────────────────
-    const products = await Product.find(filter)
-      .select("name slug tagline thumbnail upvotes commentsCount topics makers createdAt launchedAt pricingType isAiProduct status") // only needed fields
-      .populate("makers", "fullname email")
-      .populate("topics", "name slug")
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .skip(skip)
-      .lean({ virtuals: false })
-      .exec();
+    // ── Fetch products (lean) + total count in parallel ─────────────────────
+    const [products, total] = await Promise.all([
+      Product.find(filter)
+        .select("name slug tagline thumbnail upvotes commentsCount topics makers createdAt launchedAt pricingType isAiProduct status") // only needed fields
+        .populate("makers", "fullname email")
+        .populate("topics", "name slug")
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .skip(skip)
+        .lean({ virtuals: false })
+        .exec(),
+      Product.countDocuments(filter),
+    ]);
 
     // ── Batch upvote check (single query instead of per-product array fetch) ─
     let upvotedProductIds = new Set<string>();
@@ -367,9 +373,6 @@ export async function getProductsController(
       ...p,
       upvoteTrue: upvotedProductIds.has(p._id.toString()) ? 1 : 0,
     }));
-
-    // ── Count total (for pagination) ───────────────────────────────────────
-    const total = await Product.countDocuments(filter);
 
     res.status(200).json({
       success: true,
@@ -410,6 +413,7 @@ export async function deleteProductController(
       return;
     }
     await Product.findByIdAndDelete(id);
+    cacheDelPrefix("home:");
 
     res.status(200).json({
       success: true,
@@ -431,9 +435,13 @@ export async function getProductBySlugController(
     const { slug } = req.params;
     const userId = (req as any).user?.id || null; // Get authenticated user ID if available
 
+    // lean() + omit the (potentially large) upvotedBy array from the wire.
     const product = await Product.findOne({ slug })
+      .select("-upvotedBy")
       .populate("makers", "fullname email avatar")
-      .populate("topics", "name slug icon description");
+      .populate("topics", "name slug icon description")
+      .lean()
+      .exec();
 
     if (!product) {
       res.status(404).json({
@@ -443,31 +451,20 @@ export async function getProductBySlugController(
       return;
     }
 
-    // Add upvoteTrue field to product
-    const productObj: any = product.toObject();
-    
-    // Check if user has upvoted: 1 = yes, 0 = no
-    if (userId && productObj.upvotedBy && Array.isArray(productObj.upvotedBy)) {
-      productObj.upvoteTrue = productObj.upvotedBy.some(
-        (id: any) => id.toString() === userId
-      ) ? 1 : 0;
-    } else {
-      productObj.upvoteTrue = 0;
-    }
+    const productObj: any = { ...product };
 
-    // Check if user has saved this product
-    productObj.isSaved = false;
-    if (userId) {
-      const currentUser = await User.findById(userId).select("savedProducts");
-      if (currentUser && (currentUser as any).savedProducts) {
-        productObj.isSaved = (currentUser as any).savedProducts.some(
-          (savedId: any) => savedId.toString() === product._id.toString()
-        );
-      }
-    }
+    // Parallel indexed membership checks instead of loading full arrays.
+    const [hasUpvoted, saved] = userId
+      ? await Promise.all([
+          Product.exists({ _id: product._id, upvotedBy: userId }).lean(),
+          User.findOne({ _id: userId, savedProducts: product._id })
+            .select("_id")
+            .lean(),
+        ])
+      : [null, null];
 
-    // Remove upvotedBy array from response for privacy
-    delete productObj.upvotedBy;
+    productObj.upvoteTrue = hasUpvoted ? 1 : 0;
+    productObj.isSaved = !!saved;
 
     res.status(200).json({
       success: true,
@@ -637,6 +634,8 @@ export async function updateProductStatusController(
       return;
     }
 
+    cacheDelPrefix("home:");
+
     res.status(200).json({
       success: true,
       message: "Product status updated successfully",
@@ -667,7 +666,12 @@ export async function upvoteProductController(
       return;
     }
 
-    const product = await Product.findById(id);
+    // Load only what we need — and check membership with an indexed $in query
+    // instead of pulling the entire upvotedBy array into memory.
+    const [product, alreadyUpvoted] = await Promise.all([
+      Product.findById(id).select("makers name slug").lean().exec(),
+      Product.exists({ _id: id, upvotedBy: userId }).lean(),
+    ]);
 
     if (!product) {
       res.status(404).json({
@@ -677,10 +681,7 @@ export async function upvoteProductController(
       return;
     }
 
-    // Check if user has already upvoted
-    const hasUpvoted = product.upvotedBy.some(
-      (upvoterId: mongoose.Types.ObjectId) => upvoterId.toString() === userId
-    );
+    const hasUpvoted = !!alreadyUpvoted;
 
     let updatedProduct;
     let message: string;
@@ -695,18 +696,6 @@ export async function upvoteProductController(
         { new: true }
       );
       message = "Upvote removed successfully";
-
-      // Remove the upvote notification when toggled off
-      if (product.makers && product.makers.length > 0) {
-        for (const makerId of product.makers) {
-          await removeNotificationIfExists({
-            recipient: makerId.toString(),
-            actor:     userId,
-            type:      "upvote_product",
-            entityId:  product._id.toString(),
-          });
-        }
-      }
     } else {
       // Add upvote
       updatedProduct = await Product.findByIdAndUpdate(
@@ -718,24 +707,36 @@ export async function upvoteProductController(
         { new: true }
       );
       message = "upvoted successfully";
-
-      // Upsert notification (no duplicates if user re-upvotes)
-      if (product.makers && product.makers.length > 0) {
-        const actor = await User.findById(userId).select("fullname username");
-        const actorName = actor?.fullname || "Someone";
-        for (const makerId of product.makers) {
-          await upsertNotification({
-            recipient:  makerId.toString(),
-            actor:      userId,
-            type:       "upvote_product",
-            message:    `${actorName} upvoted ${product.name}`,
-            entityId:   product._id.toString(),
-            entityType: "product",
-            link:       `/products/${product.slug}`,
-          });
-        }
-      }
     }
+
+    // Notify makers in parallel (was a sequential for-await loop).
+    if (product.makers && product.makers.length > 0) {
+      const actor = await User.findById(userId).select("fullname username").lean();
+      const actorName = actor?.fullname || "Someone";
+      await Promise.all(
+        product.makers.map((makerId: mongoose.Types.ObjectId) =>
+          hasUpvoted
+            ? removeNotificationIfExists({
+                recipient: makerId.toString(),
+                actor:     userId,
+                type:      "upvote_product",
+                entityId:  product._id.toString(),
+              })
+            : upsertNotification({
+                recipient:  makerId.toString(),
+                actor:      userId,
+                type:       "upvote_product",
+                message:    `${actorName} upvoted ${product.name}`,
+                entityId:   product._id.toString(),
+                entityType: "product",
+                link:       `/products/${product.slug}`,
+              })
+        )
+      );
+    }
+
+    // Home page reflects upvote counts — drop the cached copy immediately.
+    cacheDelPrefix("home:");
 
     res.status(200).json({
       success: true,
@@ -767,13 +768,8 @@ export async function upvoteProductController(
  * - Minimal field selection (no upvotedBy in main query)
  * - Consistent response format
  */
-export async function getHomePageProductsController(
-  req: Request,
-  res: Response
-): Promise<void> {
+async function fetchHomePageData(userId: string | null) {
   try {
-    const userId = (req as any).user?.id || null;
-
     // ── Bangladesh timezone (UTC+6) date calculations ───────────────────
     const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
     const now = new Date();
@@ -921,16 +917,42 @@ export async function getHomePageProductsController(
       publishedAt: s.publishedAt,
     }));
 
+    return {
+      today: buildCategory(todayProducts, "Top Products Launching Today"),
+      yesterday: buildCategory(yesterdayProducts, "Yesterday's Top Products"),
+      lastWeek: buildCategory(lastWeekProducts, "Last Week's Top Products"),
+      lastMonth: buildCategory(lastMonthProducts, "Last Month's Top Products"),
+      stories: mappedStories,
+    };
+  } catch (error) {
+    console.error("[getHomePageProductsController] Error:", error);
+    // Never cache a failed load — rethrow so the controller returns the fallback
+    throw error;
+  }
+}
+
+/**
+ * Get home page products — public home page (cached 60s when anonymous).
+ * GET /api/products/home
+ *
+ * Anonymous responses are identical for every visitor, so they are served
+ * straight from the in-memory cache (no DB round-trips at all).
+ */
+export async function getHomePageProductsController(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const userId = (req as any).user?.id || null;
+
+    const data = userId
+      ? await fetchHomePageData(userId)
+      : await getOrSet("home:products", 60_000, () => fetchHomePageData(null));
+
     res.status(200).json({
       success: true,
       message: "Products fetched successfully",
-      data: {
-        today: buildCategory(todayProducts, "Top Products Launching Today"),
-        yesterday: buildCategory(yesterdayProducts, "Yesterday's Top Products"),
-        lastWeek: buildCategory(lastWeekProducts, "Last Week's Top Products"),
-        lastMonth: buildCategory(lastMonthProducts, "Last Month's Top Products"),
-        stories: mappedStories,
-      },
+      data,
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Server error";
@@ -977,28 +999,43 @@ export async function getProductAlternativesController(
     };
 
     const skip = (Number(page) - 1) * Number(limit);
-    const alternatives = await Product.find({
-      _id: { $ne: product._id },
-      topics: { $in: product.topics },
-      status: "approved",
-    })
-      .populate("topics", "name slug")
-      .sort(sortOptions[sort as string] || sortOptions["most-upvoted"])
-      .limit(Number(limit))
-      .skip(skip);
 
-    const total = await Product.countDocuments({
-      _id: { $ne: product._id },
-      topics: { $in: product.topics },
-      status: "approved",
-    });
+    // Lean + count in parallel; upvotedBy is never loaded.
+    const [alternatives, total] = await Promise.all([
+      Product.find({
+        _id: { $ne: product._id },
+        topics: { $in: product.topics },
+        status: "approved",
+      })
+        .select("-upvotedBy") // keep every other field for frontend compatibility
+        .populate("topics", "name slug")
+        .sort(sortOptions[sort as string] || sortOptions["most-upvoted"])
+        .limit(Number(limit))
+        .skip(skip)
+        .lean()
+        .exec(),
+      Product.countDocuments({
+        _id: { $ne: product._id },
+        topics: { $in: product.topics },
+        status: "approved",
+      }),
+    ]);
 
-    const productsWithUpvote = alternatives.map((p) => {
-      const obj: any = p.toObject();
-      obj.upvoteTrue = userId && obj.upvotedBy?.some((id: any) => id.toString() === userId) ? 1 : 0;
-      delete obj.upvotedBy;
-      return obj;
-    });
+    // Batch upvote check (single indexed query).
+    let upvotedSet = new Set<string>();
+    if (userId && alternatives.length > 0) {
+      const ids = alternatives.map((p: any) => p._id);
+      const upvotedDocs = await Product.find({ _id: { $in: ids }, upvotedBy: userId })
+        .select("_id")
+        .lean()
+        .exec();
+      upvotedSet = new Set(upvotedDocs.map((d: any) => d._id.toString()));
+    }
+
+    const productsWithUpvote = alternatives.map((p: any) => ({
+      ...p,
+      upvoteTrue: upvotedSet.has(p._id.toString()) ? 1 : 0,
+    }));
 
     res.status(200).json({
       success: true,
@@ -1029,17 +1066,21 @@ export async function getProductLaunchesController(
     const userId = (req as any).user?.id || null;
 
     const product = await Product.findOne({ slug, status: "approved" })
+      .select("-upvotedBy")
       .populate("topics", "name slug")
-      .populate("makers", "fullname email");
+      .populate("makers", "fullname email")
+      .lean()
+      .exec();
 
     if (!product) {
       res.status(404).json({ success: false, message: "Product not found" });
       return;
     }
 
-    const productObj: any = product.toObject();
-    productObj.upvoteTrue = userId && productObj.upvotedBy?.some((id: any) => id.toString() === userId) ? 1 : 0;
-    delete productObj.upvotedBy;
+    const productObj: any = { ...product };
+    productObj.upvoteTrue = userId
+      ? (await Product.exists({ _id: product._id, upvotedBy: userId }).lean()) ? 1 : 0
+      : 0;
 
     // Return product as a single launch (products can be relaunched)
     const launches = [productObj];
@@ -1276,6 +1317,8 @@ export async function updateProductController(
       .populate("makers", "fullname email")
       .populate("topics", "name slug");
 
+    cacheDelPrefix("home:");
+
     res.status(200).json({
       success: true,
       message: "Product updated successfully",
@@ -1494,6 +1537,8 @@ export async function createProductCloudinaryController(
       .populate("makers", "fullname email")
       .populate("topics", "name slug");
 
+    cacheDelPrefix("home:");
+
     res.status(201).json({
       success: true,
       message: "Product submitted successfully",
@@ -1650,6 +1695,8 @@ export async function updateProductCloudinaryController(
       .populate("makers", "fullname email")
       .populate("topics", "name slug");
 
+    cacheDelPrefix("home:");
+
     res.status(200).json({
       success: true,
       message: "Product updated successfully",
@@ -1688,36 +1735,31 @@ export async function saveProductController(
       return;
     }
 
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select("savedProducts");
     if (!user) {
       res.status(404).json({ success: false, message: "User not found" });
       return;
     }
 
-    // Ensure savedProducts array exists on user
     const savedArr: mongoose.Types.ObjectId[] = (user as any).savedProducts || [];
     const prodIdStr = product._id.toString();
-    const existingIndex = savedArr.findIndex((p: any) => p.toString() === prodIdStr);
+    const alreadySaved = savedArr.some((p: any) => p.toString() === prodIdStr);
 
-    let saved = false;
-    if (existingIndex >= 0) {
-      // Unsave
-      savedArr.splice(existingIndex, 1);
-      saved = false;
+    // Atomic update — no need to load + re-save the entire user document.
+    if (alreadySaved) {
+      await User.findByIdAndUpdate(userId, { $pull: { savedProducts: product._id } });
     } else {
-      // Save
-      savedArr.push(product._id);
-      saved = true;
+      await User.findByIdAndUpdate(userId, { $addToSet: { savedProducts: product._id } });
     }
 
-    (user as any).savedProducts = savedArr;
-    await user.save();
+    const saved = !alreadySaved;
+    const savedCount = savedArr.length + (saved ? 1 : -1);
 
     res.status(200).json({
       success: true,
       message: saved ? "Product saved successfully" : "Product unsaved successfully",
       saved,
-      savedCount: savedArr.length,
+      savedCount,
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Server error";

@@ -4,10 +4,14 @@
   "description": "Product Hunt Backend API (Node.js, Express, TypeScript)",
   "main": "dist/index.js",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "cross-env NODE_OPTIONS=--no-deprecation tsx watch index.ts",
     "build": "tsc",
-    "start": "node --no-deprecation dist/index.js"
+    "start": "node --no-deprecation dist/index.js",
+    "sync-indexes": "tsx scripts/syncIndexes.ts"
   },
   "keywords": [
     "node",
@@ -21,9 +25,12 @@
   "dependencies": {
     "bcryptjs": "^3.0.3",
     "cloudinary": "^2.10.0",
+    "compression": "^1.8.1",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.6.1",
+    "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "mongodb": "^7.4.0",
     "mongoose": "^9.1.2",
@@ -35,6 +42,7 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
+    "@types/compression": "^1.8.1",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.25",
     "@types/jsonwebtoken": "^9.0.6",

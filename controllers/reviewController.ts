@@ -210,13 +210,16 @@ export async function getProductReviewsController(
 
     const skip = (Number(page) - 1) * Number(limit);
 
-    const reviews = await Review.find(filter)
-      .populate("user", "fullname email username profileImage")
-      .sort(sortOptions)
-      .limit(Number(limit))
-      .skip(skip);
-
-    const total = await Review.countDocuments(filter);
+    const [reviews, total] = await Promise.all([
+      Review.find(filter)
+        .populate("user", "fullname email username profileImage")
+        .sort(sortOptions)
+        .limit(Number(limit))
+        .skip(skip)
+        .lean()
+        .exec(),
+      Review.countDocuments(filter),
+    ]);
 
     // Calculate rating statistics (unfiltered - always show full distribution)
     const ratingStats = await Review.aggregate([
@@ -473,14 +476,17 @@ export async function getUserReviewsController(
 
     const skip = (Number(page) - 1) * Number(limit);
 
-    const reviews = await Review.find({ user: userId })
-      .populate("user", "fullname email")
-      .populate("product", "name slug thumbnail")
-      .sort({ createdAt: -1 })
-      .limit(Number(limit))
-      .skip(skip);
-
-    const total = await Review.countDocuments({ user: userId });
+    const [reviews, total] = await Promise.all([
+      Review.find({ user: userId })
+        .populate("user", "fullname email")
+        .populate("product", "name slug thumbnail")
+        .sort({ createdAt: -1 })
+        .limit(Number(limit))
+        .skip(skip)
+        .lean()
+        .exec(),
+      Review.countDocuments({ user: userId }),
+    ]);
 
     res.status(200).json({
       success: true,
@@ -643,16 +649,18 @@ export async function getAllReviewsController(
     const sortObj: any = {};
     sortObj[sort as string] = sortOrder;
 
-    // Get paginated reviews
-    const reviews = await Review.find(filter)
-      .populate("user", "fullname email")
-      .populate("product", "name slug thumbnail")
-      .sort(sortObj)
-      .limit(Number(limit))
-      .skip(skip);
-
-    // Get total count for pagination
-    const total = await Review.countDocuments(filter);
+    // Get paginated reviews + total count in parallel
+    const [reviews, total] = await Promise.all([
+      Review.find(filter)
+        .populate("user", "fullname email")
+        .populate("product", "name slug thumbnail")
+        .sort(sortObj)
+        .limit(Number(limit))
+        .skip(skip)
+        .lean()
+        .exec(),
+      Review.countDocuments(filter),
+    ]);
 
     // Calculate statistics for all reviews (not filtered)
     const stats = await Review.aggregate([

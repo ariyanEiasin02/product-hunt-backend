@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import mongoose from "mongoose";
 import Comment from "../models/commentSchema.js";
 import Product from "../models/productSchema.js";
+import User from "../models/userSchema.js";
 import { createNotification, upsertNotification, removeNotificationIfExists } from "./notificationController.js";
 
 /**
@@ -108,39 +109,55 @@ export async function createCommentController(
       .populate("user", "fullname email username profileImage")
       .populate("product", "name slug");
 
-    // ── Notification: new comment on product → notify makers ──────────────
+    // ── Notifications ──────────────────────────────────────────────────────
+    const notificationTasks: Promise<void>[] = [];
+    // Only hit the DB for the actor name if a notification will be created.
+    const needsActor =
+      (!parentComment && product.makers && product.makers.length > 0) ||
+      !!parentComment;
+    let actorName = "Someone";
+    if (needsActor) {
+      const actor = await User.findById(userId).select("fullname username").lean();
+      actorName = actor?.fullname || "Someone";
+    }
+
+    // New comment on product → notify makers (in parallel)
     if (!parentComment && product.makers && product.makers.length > 0) {
-      const actor = await (await import("../models/userSchema.js")).default.findById(userId).select("fullname username");
-      const actorName = actor?.fullname || "Someone";
       for (const makerId of product.makers) {
-        await createNotification({
-          recipient: makerId.toString(),
-          actor: userId,
-          type: "comment",
-          message: `${actorName} commented on ${product.name}`,
-          entityId: product._id.toString(),
-          entityType: "product",
-          link: `/products/${product.slug}`,
-        });
+        notificationTasks.push(
+          createNotification({
+            recipient: makerId.toString(),
+            actor: userId,
+            type: "comment",
+            message: `${actorName} commented on ${product.name}`,
+            entityId: product._id.toString(),
+            entityType: "product",
+            link: `/products/${product.slug}`,
+          })
+        );
       }
     }
 
-    // ── Notification: reply → notify parent comment author ────────────────
+    // Reply → notify parent comment author
     if (parentComment) {
       const parentDoc = await Comment.findById(parentComment);
       if (parentDoc) {
-        const actor = await (await import("../models/userSchema.js")).default.findById(userId).select("fullname username");
-        const actorName = actor?.fullname || "Someone";
-        await createNotification({
-          recipient: parentDoc.user.toString(),
-          actor: userId,
-          type: "reply",
-          message: `${actorName} replied to your comment on ${product.name}`,
-          entityId: parentDoc._id.toString(),
-          entityType: "comment",
-          link: `/products/${product.slug}`,
-        });
+        notificationTasks.push(
+          createNotification({
+            recipient: parentDoc.user.toString(),
+            actor: userId,
+            type: "reply",
+            message: `${actorName} replied to your comment on ${product.name}`,
+            entityId: parentDoc._id.toString(),
+            entityType: "comment",
+            link: `/products/${product.slug}`,
+          })
+        );
       }
+    }
+
+    if (notificationTasks.length > 0) {
+      await Promise.all(notificationTasks);
     }
 
     res.status(201).json({
@@ -190,7 +207,8 @@ export async function getAllCommentsController(
       })
       .sort({ createdAt: -1 })
       .limit(Number(limit))
-      .skip(skip);
+      .skip(skip)
+      .lean();
 
     const total = await Comment.countDocuments(filter);
 
@@ -254,7 +272,8 @@ export async function getProductCommentsController(
       })
       .sort({ isPinned: -1, upvotes: -1, createdAt: -1 })
       .limit(Number(limit))
-      .skip(skip);
+      .skip(skip)
+      .lean();
 
     const total = await Comment.countDocuments(filter);
 
@@ -313,7 +332,8 @@ export async function getCommentRepliesController(
       .populate("product", "name slug")
       .sort({ createdAt: 1 })
       .limit(Number(limit))
-      .skip(skip);
+      .skip(skip)
+      .lean();
 
     const total = await Comment.countDocuments({ 
       parentComment: commentId, 
@@ -473,18 +493,19 @@ export async function deleteCommentController(
       return;
     }
 
-    // Function to recursively get all reply IDs (including nested replies)
+    // Collect all reply IDs level-by-level (one query per depth instead of
+    // one query per comment — fixes the N+1 recursive pattern).
     async function getAllReplyIds(parentId: string): Promise<string[]> {
-      const replies = await Comment.find({ parentComment: parentId });
-      let allIds: string[] = [];
-      
-      for (const reply of replies) {
-        allIds.push(reply._id.toString());
-        // Recursively get sub-replies
-        const subReplyIds = await getAllReplyIds(reply._id.toString());
-        allIds = allIds.concat(subReplyIds);
+      const allIds: string[] = [];
+      let toVisit: string[] = [parentId];
+      while (toVisit.length > 0) {
+        const replies = await Comment.find({ parentComment: { $in: toVisit } })
+          .select("_id")
+          .lean()
+          .exec();
+        toVisit = replies.map((r) => r._id.toString());
+        allIds.push(...toVisit);
       }
-      
       return allIds;
     }
 
@@ -548,7 +569,8 @@ export async function getUserCommentsController(
       .populate("product", "name slug thumbnail")
       .sort({ createdAt: -1 })
       .limit(Number(limit))
-      .skip(skip);
+      .skip(skip)
+      .lean();
 
     const total = await Comment.countDocuments({ user: userId, isDeleted: false });
 
@@ -781,9 +803,9 @@ export async function createReplyController(
         },
       });
 
-    // ── Notification: reply → notify parent comment author ────────────────
-    const product = await Product.findById(productId).select("name slug");
-    const actor = await (await import("../models/userSchema.js")).default.findById(userId).select("fullname username");
+    // ── Notification: reply → notify parent comment author (non-blocking) ──
+    const product = await Product.findById(productId).select("name slug").lean();
+    const actor = await User.findById(userId).select("fullname username").lean();
     const actorName = actor?.fullname || "Someone";
     await createNotification({
       recipient: parentComment.user.toString(),

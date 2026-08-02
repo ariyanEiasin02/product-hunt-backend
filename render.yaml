@@ -1,0 +1,41 @@
+# Render Blueprint — deploy this backend with one click.
+# Docs: https://render.com/docs/blueprint-spec
+#
+# NOTE: The Free instance type sleeps after 15 min of inactivity.
+# A cron-job.org ping to /health every 10 minutes keeps it warm.
+# For zero cold starts and guaranteed uptime, switch to Starter ($7/mo).
+
+services:
+  - type: web
+    name: product-hunt-backend
+    runtime: node
+    plan: free # or "starter" to eliminate cold starts
+    # NOTE: NODE_ENV is NOT set here because it would make `npm ci` skip
+    # devDependencies (tsc is a devDependency) and break the build.
+    # Render sets NODE_ENV=production automatically at runtime for Node services.
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: JWT_SECRET
+        sync: false # set it manually — long random string
+      - key: MONGO_URI
+        sync: false # your MongoDB Atlas connection string
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: "https://product-hunt-admin.vercel.app,https://product-hunt-frontend.vercel.app,https://product-hunt-frontend-blush.vercel.app"
+        sync: false
+      - key: RATE_LIMIT_API_MAX
+        value: "600"
+        sync: false
+      - key: RATE_LIMIT_AUTH_MAX
+        value: "50"
+        sync: false
