@@ -22,12 +22,14 @@ import {
   requireSingleFile,
 } from "../../middleware/uploadMiddleware.js";
 import { verifyToken } from "../../middleware/authMiddleware.js";
+import { uploadLimiter } from "../../middleware/rateLimiter.js";
 
 const router = express.Router();
 
 // Single image upload (now uses Cloudinary via memory storage)
 router.post(
   "/upload/image",
+  uploadLimiter,
   verifyToken,
   uploadImageMemory.single("image"),
   handleMulterError,
@@ -38,6 +40,7 @@ router.post(
 // Multiple images upload (now uses Cloudinary via memory storage)
 router.post(
   "/upload/images",
+  uploadLimiter,
   verifyToken,
   uploadImagesMemory.array("images", 10),
   handleMulterError,
@@ -47,6 +50,7 @@ router.post(
 // Product media upload (thumbnail + gallery, now uses Cloudinary)
 router.post(
   "/upload/product-media",
+  uploadLimiter,
   verifyToken,
   uploadProductMediaMemory.fields([
     { name: "thumbnail", maxCount: 1 },
@@ -59,6 +63,7 @@ router.post(
 // Avatar upload (now uses Cloudinary via memory storage)
 router.post(
   "/upload/avatar",
+  uploadLimiter,
   verifyToken,
   uploadImageMemory.single("avatar"),
   handleMulterError,
@@ -76,6 +81,7 @@ router.delete("/upload/:filename", verifyToken, deleteFileController);
 // Single image upload to Cloudinary
 router.post(
   "/upload/cloudinary/image",
+  uploadLimiter,
   verifyToken,
   uploadImageMemory.single("image"),
   handleMulterError,
@@ -86,6 +92,7 @@ router.post(
 // Multiple images upload to Cloudinary
 router.post(
   "/upload/cloudinary/images",
+  uploadLimiter,
   verifyToken,
   uploadImagesMemory.array("images", 10),
   handleMulterError,
@@ -95,6 +102,7 @@ router.post(
 // Product media upload to Cloudinary (thumbnail + gallery)
 router.post(
   "/upload/cloudinary/product-media",
+  uploadLimiter,
   verifyToken,
   uploadProductMediaMemory.fields([
     { name: "thumbnail", maxCount: 1 },
@@ -107,6 +115,7 @@ router.post(
 // Avatar upload to Cloudinary
 router.post(
   "/upload/cloudinary/avatar",
+  uploadLimiter,
   verifyToken,
   uploadImageMemory.single("avatar"),
   handleMulterError,

@@ -21,19 +21,32 @@ const connectDB = async (): Promise<void> => {
     attempt++;
     try {
       // ── Production-optimised connection pool ──────────────────────────────
-      // minPoolSize:  Keeps 5 connections alive after idle, avoiding TLS
-      //               handshake overhead on every burst of requests.
-      // maxPoolSize:  Caps concurrent connections to MongoDB Atlas to prevent
-      //               overwhelming the free-tier M0 cluster.
-      // serverSelectionTimeoutMS:  Fail fast (5s) — don't let a hung DNS/
-      //               network request tie up a serverless/Render process.
-      // socketTimeoutMS:  Close sockets that stall for 45s (e.g. during a
-      //               slow aggregation).
+      // minPoolSize:        Keeps a few connections alive after idle, avoiding
+      //                     the TLS handshake cost on every burst of requests.
+      // maxPoolSize:        Caps concurrent connections to MongoDB Atlas so the
+      //                     free-tier M0 cluster is never overwhelmed.
+      // serverSelectionTimeoutMS:  Fail fast (5s) — don't let a hung DNS or
+      //                     network request tie up the Render process.
+      // socketTimeoutMS:    Close sockets that stall for 45s (e.g. during a
+      //                     slow aggregation).
+      // connectTimeoutMS:   Bound the initial TCP/TLS connect (defaults to 30s
+      //                     in older drivers, 10s is plenty).
+      // maxIdleTimeMS:      Free idle sockets after 60s so an idle instance
+      //                     doesn't hold connections forever.
+      // heartbeatFrequencyMS: Check server health every 10s (default 10s) —
+      //                     keeps the driver's view of the topology fresh.
       await mongoose.connect(mongoURI, {
-        minPoolSize: 5,
+        minPoolSize: 2,
         maxPoolSize: 20,
         serverSelectionTimeoutMS: 5000,
         socketTimeoutMS: 45000,
+        connectTimeoutMS: 10000,
+        maxIdleTimeMS: 60000,
+        heartbeatFrequencyMS: 10000,
+        // Don't rebuild indexes on every boot in production — that is wasted
+        // CPU at cold start. Schema indexes are still created on first
+        // connection in dev; run `npm run sync-indexes` once in production.
+        autoIndex: process.env.NODE_ENV !== "production",
       });
 
       console.log(`Connected to Database: ${mongoose.connection.name}`);

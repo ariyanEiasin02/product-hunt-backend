@@ -18,12 +18,13 @@ import {
 import { isAdmin, verifyToken, isAdminOrSelf } from "../../middleware/authMiddleware.js";
 import { uploadImageMemory } from "../../config/multer.js";
 import { handleMulterError } from "../../middleware/uploadMiddleware.js";
+import { authLimiter } from "../../middleware/rateLimiter.js";
 
 const router = Router();
 
-// Auth
-router.post("/register", registrationController);
-router.post("/login", loginController);
+// Auth (stricter rate limit to slow credential stuffing)
+router.post("/register", authLimiter, registrationController);
+router.post("/login", authLimiter, loginController);
 
 // Current user
 router.get("/me", verifyToken, getCurrentUserController);

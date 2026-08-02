@@ -6,6 +6,7 @@ import mongoose from "mongoose";
 import crypto from "crypto";
 import { AuthRequest } from "../middleware/authMiddleware.js";
 import { createNotification } from "./notificationController.js";
+import { getOrSet } from "../utils/cache.js";
 
 // Simple email validation helper
 function emailValidation(email: string): boolean {
@@ -229,7 +230,13 @@ async function deleteUserController(req: Request, res: Response): Promise<void> 
 
 async function markersController(req: Request, res: Response): Promise<void> {
     try{
-        const users = await User.find().select("fullname username profileImage");
+        // Returns ALL users for the product-submission maker picker — cache 60s.
+        const users = await getOrSet("auth:markers", 60_000, () =>
+            User.find()
+                .select("fullname username profileImage")
+                .lean()
+                .exec()
+        );
         res.status(200).json({
             success: true,
             message: "Users retrieved successfully",

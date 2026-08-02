@@ -93,7 +93,10 @@ export async function uploadToCloudinary(
     extraOptions,
     convertToWebp: shouldConvert = true,
     webpQuality = 80,
-    webpMaxWidth,
+    // Cap at 2000px wide unless the caller asks for something else. This keeps
+    // a 10MB phone photo from being uploaded at full size — less memory, less
+    // bandwidth, less Cloudinary processing/storage, faster uploads.
+    webpMaxWidth = 2000,
     webpMaxHeight,
     webpPreserveTransparency = true,
   } = options;
