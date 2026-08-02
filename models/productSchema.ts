@@ -181,5 +181,15 @@ ProductSchema.index({ topics: 1 });
 ProductSchema.index({ upvotes: -1 });
 ProductSchema.index({ slug: 1, status: 1 });
 
+// Indexes added in the performance pass:
+// - upvotedBy: makes the "did this user upvote it?" existence check a fast
+//   indexed lookup instead of loading the whole array (used by product
+//   detail, alternatives, launches, leaderboard, category pages).
+ProductSchema.index({ upvotedBy: 1 });
+// - makers + status: powers "user's products" profile queries.
+ProductSchema.index({ makers: 1, status: 1 });
+// - status + topics: powers alternatives + category-page product queries.
+ProductSchema.index({ status: 1, topics: 1 });
+
 const Product = mongoose.models.Product || mongoose.model<IProduct>("Product", ProductSchema);
 export default Product;

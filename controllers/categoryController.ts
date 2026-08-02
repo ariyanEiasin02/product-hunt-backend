@@ -3,6 +3,10 @@ import Category from "../models/categorySchema.js";
 import Subcategory from "../models/subcategorySchema.js";
 import Product from "../models/productSchema.js";
 import { uploadToCloudinary } from "../utils/uploadToCloudinary.js";
+import { getOrSet, cacheDelPrefix } from "../utils/cache.js";
+
+// Category/subcategory data changes rarely — cache public reads for 60s.
+const CATEGORY_CACHE_TTL = 60_000;
 
 export async function createCategoryController(
   req: Request,
@@ -23,6 +27,8 @@ export async function createCategoryController(
       description,
     });
 
+    cacheDelPrefix("category:");
+    cacheDelPrefix("footer:");
     res.status(201).json({
       success: true,
       message: "Category created (waiting approval)",
@@ -49,6 +55,8 @@ export async function updateCategoryController(
     category.slug = slug;
     category.description = description;
     await category.save();
+    cacheDelPrefix("category:");
+    cacheDelPrefix("footer:");
     res.status(200).json({
       success: true,
       message: "Category updated successfully",
@@ -68,7 +76,7 @@ export async function getCategoriesController(
     const skip  = (page - 1) * limit;
 
     const [categories, total] = await Promise.all([
-      Category.find({}).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      Category.find({}).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       Category.countDocuments({}),
     ]);
 
@@ -115,6 +123,8 @@ export async function categoryStatusController(
     category.status = status;
     category.isActive = status === "approved";
     await category.save();
+    cacheDelPrefix("category:");
+    cacheDelPrefix("footer:");
 
     res.status(200).json({
       success: true,
@@ -140,6 +150,8 @@ export async function categoryDeleteController(
       return;
     }
     await Category.findByIdAndDelete(id);
+    cacheDelPrefix("category:");
+    cacheDelPrefix("footer:");
 
     res.status(200).json({
       success: true,
@@ -189,6 +201,8 @@ export async function createSubcategoryController(
     await Category.findByIdAndUpdate(category, {
       $addToSet: { subcategories: subcategory._id },
     });
+    cacheDelPrefix("category:");
+    cacheDelPrefix("footer:");
 
     res.status(201).json({
       success: true,
@@ -227,6 +241,8 @@ export async function updateSubCategoryController(
       subcategory.image = req.body.image;
     }
     await subcategory.save();
+    cacheDelPrefix("category:");
+    cacheDelPrefix("footer:");
     res.status(200).json({
       success: true,
       message: "Subcategory updated successfully",
@@ -246,7 +262,7 @@ export async function getSubcategoriesController(
     const skip  = (page - 1) * limit;
 
     const [subcategories, total] = await Promise.all([
-      Subcategory.find({}).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      Subcategory.find({}).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       Subcategory.countDocuments({}),
     ]);
 
@@ -294,6 +310,8 @@ export async function subcategoryStatusController(
     subcategory.status = status;
     subcategory.isActive = status === "approved";
     await subcategory.save();
+    cacheDelPrefix("category:");
+    cacheDelPrefix("footer:");
 
     res.status(200).json({
       success: true,
@@ -319,6 +337,8 @@ export async function subcategoryDeleteController(
       return;
     }
     await Subcategory.findByIdAndDelete(id);
+    cacheDelPrefix("category:");
+    cacheDelPrefix("footer:");
 
     res.status(200).json({
       success: true,
@@ -334,10 +354,15 @@ export async function  allGetCategoriesController(
   res: Response
 ): Promise<void> {
   try {
-    const categories = await Category.find({ status: "approved" }).populate({
-      path: "subcategories",
-      match: { status: "approved" },
-    });
+    const categories = await getOrSet("category:all", CATEGORY_CACHE_TTL, () =>
+      Category.find({ status: "approved" })
+        .populate({
+          path: "subcategories",
+          match: { status: "approved" },
+        })
+        .lean()
+        .exec()
+    );
     res.status(200).json({
       success: true,
       message: "Approved categories fetched successfully",
@@ -354,15 +379,19 @@ export async function getNavbarCategoriesController(
   res: Response
 ): Promise<void> {
   try {
-    const categories = await Category.find({ status: "approved" })
-      .select("_id name slug")
-      .limit(8)
-      .populate({
-        path: "subcategories",
-        match: { status: "approved" },
-        select: "_id name slug",
-       perDocumentLimit: 8,
-      });
+    const categories = await getOrSet("category:navbar", CATEGORY_CACHE_TTL, () =>
+      Category.find({ status: "approved" })
+        .select("_id name slug")
+        .limit(8)
+        .populate({
+          path: "subcategories",
+          match: { status: "approved" },
+          select: "_id name slug",
+          perDocumentLimit: 8,
+        })
+        .lean()
+        .exec()
+    );
 
     res.status(200).json({
       success: true,
@@ -384,15 +413,19 @@ export async function getAllCategoriesSearchController(
   res: Response
 ): Promise<void> {
   try {
-    const categories = await Category.find({ status: "approved" })
-      .select("_id name slug")
-      .limit(5)
-      .populate({
-        path: "subcategories",
-        match: { status: "approved" },
-        select: "_id name slug",
-       perDocumentLimit: 6,
-      });
+    const categories = await getOrSet("category:search", CATEGORY_CACHE_TTL, () =>
+      Category.find({ status: "approved" })
+        .select("_id name slug")
+        .limit(5)
+        .populate({
+          path: "subcategories",
+          match: { status: "approved" },
+          select: "_id name slug",
+          perDocumentLimit: 6,
+        })
+        .lean()
+        .exec()
+    );
 
     res.status(200).json({
       success: true,
@@ -553,32 +586,36 @@ export async function getCategoryBySlugController(
 
     const skip = (Number(page) - 1) * Number(limit);
 
-    // Execute query with sort
-    const products = await Product.find(productFilter)
-      .populate("makers", "fullname email profileImage")
-      .populate("topics", "name slug")
-      .sort(sortOption)
-      .limit(Number(limit))
-      .skip(skip);
+    // Execute query with sort — lean + minimal select, count in parallel,
+    // and never load the (potentially large) upvotedBy array.
+    const [products, total] = await Promise.all([
+      Product.find(productFilter)
+        .select("-upvotedBy") // keep every other field for frontend compatibility
+        .populate("makers", "fullname email profileImage")
+        .populate("topics", "name slug")
+        .sort(sortOption)
+        .limit(Number(limit))
+        .skip(skip)
+        .lean()
+        .exec(),
+      Product.countDocuments(productFilter),
+    ]);
 
-    // Add upvote status and remove upvotedBy array
-    const productsWithUpvoteStatus = products.map((product) => {
-      const productObj: any = product.toObject();
-      if (userId && productObj.upvotedBy && Array.isArray(productObj.upvotedBy)) {
-        productObj.upvoteTrue = productObj.upvotedBy.some(
-          (id: any) => id.toString() === userId
-        )
-          ? 1
-          : 0;
-      } else {
-        productObj.upvoteTrue = 0;
-      }
-      // Remove upvotedBy array from response for privacy
-      delete productObj.upvotedBy;
-      return productObj;
-    });
+    // Batch upvote check
+    let upvotedSet = new Set<string>();
+    if (userId && products.length > 0) {
+      const ids = products.map((p: any) => p._id);
+      const upvotedDocs = await Product.find({ _id: { $in: ids }, upvotedBy: userId })
+        .select("_id")
+        .lean()
+        .exec();
+      upvotedSet = new Set(upvotedDocs.map((d: any) => d._id.toString()));
+    }
 
-    const total = await Product.countDocuments(productFilter);
+    const productsWithUpvoteStatus = products.map((product: any) => ({
+      ...product,
+      upvoteTrue: upvotedSet.has(product._id.toString()) ? 1 : 0,
+    }));
 
     // Build category response data
     const categoryData = isSubcategory
@@ -653,10 +690,14 @@ export async function getApprovedSubcategoriesController(
   res: Response
 ): Promise<void> {
   try {
-    const subcategories = await Subcategory.find({ status: "approved" })
-      .select("name slug image")
-      .populate("category", "name slug")
-      .sort({ name: 1 });
+    const subcategories = await getOrSet("category:approved-subcats", CATEGORY_CACHE_TTL, () =>
+      Subcategory.find({ status: "approved" })
+        .select("name slug image")
+        .populate("category", "name slug")
+        .sort({ name: 1 })
+        .lean()
+        .exec()
+    );
 
     res.status(200).json({
       success: true,
@@ -675,18 +716,21 @@ export async function getCategoriesAndSubcategoriesForSelectController(
   res: Response
 ): Promise<void> {
   try {
-    // Fetch approved categories and subcategories in parallel
-    const [categories, subcategories] = await Promise.all([
-      Category.find({ status: "approved" })
-        .select("_id name slug")
-        .sort({ name: 1 })
-        .lean(),
-      Subcategory.find({ status: "approved" })
-        .select("_id name slug category")
-        .populate("category", "_id name slug")
-        .sort({ name: 1 })
-        .lean(),
-    ]);
+    // Fetch approved categories and subcategories in parallel (cached — this
+    // endpoint feeds a React-Select dropdown on every product submission page).
+    const [categories, subcategories] = await getOrSet("category:select", CATEGORY_CACHE_TTL, async () =>
+      Promise.all([
+        Category.find({ status: "approved" })
+          .select("_id name slug")
+          .sort({ name: 1 })
+          .lean(),
+        Subcategory.find({ status: "approved" })
+          .select("_id name slug category")
+          .populate("category", "_id name slug")
+          .sort({ name: 1 })
+          .lean(),
+      ])
+    );
 
     // Map categories to the expected flat format
     const categoryItems = categories.map((cat) => ({

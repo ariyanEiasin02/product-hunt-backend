@@ -6,13 +6,29 @@ import Subcategory from "../models/subcategorySchema.js";
 import Story from "../models/storySchema.js";
 import Comment from "../models/commentSchema.js";
 import Review from "../models/reviewSchema.js";
+import { getOrSet } from "../utils/cache.js";
 
 // ── GET /api/dashboard/overview ──
+// The overview runs ~25 queries; it changes slowly, so cache it for 30s.
+// Any admin edit (product/comment status etc.) refreshes within 30s.
 export const getDashboardOverview = async (
   _req: Request,
   res: Response
 ): Promise<void> => {
   try {
+    const data = await getOrSet("dashboard:overview", 30_000, fetchDashboardOverview);
+    res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    console.error("Dashboard overview error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch dashboard overview",
+      error: error.message,
+    });
+  }
+};
+
+async function fetchDashboardOverview() {
     // Run all count queries in parallel for performance
     const [
       totalUsers,
@@ -126,9 +142,7 @@ export const getDashboardOverview = async (
         Review.countDocuments({ createdAt: { $gte: todayStart } }),
       ]);
 
-    res.status(200).json({
-      success: true,
-      data: {
+    return {
         // Summary stats
         stats: {
           totalUsers,
@@ -173,14 +187,5 @@ export const getDashboardOverview = async (
         recentProducts,
         recentStories,
         topProducts,
-      },
-    });
-  } catch (error: any) {
-    console.error("Dashboard overview error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch dashboard overview",
-      error: error.message,
-    });
-  }
-};
+    };
+}

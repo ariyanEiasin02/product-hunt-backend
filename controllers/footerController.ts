@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import Category from "../models/categorySchema.js";
 import Subcategory from "../models/subcategorySchema.js";
 import Product from "../models/productSchema.js";
+import { getOrSet } from "../utils/cache.js";
 
 /**
  * Unified Footer Layout Controller
@@ -19,10 +20,34 @@ import Product from "../models/productSchema.js";
  * GET /api/v1/footer
  */
 export async function getLoyoutListController(
-  req: Request,
+  _req: Request,
   res: Response
 ): Promise<void> {
   try {
+    // The footer layout is identical for every visitor and changes rarely —
+    // serve it from the in-memory cache (60s TTL).
+    const data = await getOrSet("footer:layout", 60_000, fetchFooterLayout);
+
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Server error";
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage,
+      data: {
+        categories: [],
+        trendingCategories: [],
+        topReviewedProducts: [],
+        trendingProducts: [],
+        trendingSubcategories: [],
+      },
+    });
+  }
+}
+
+async function fetchFooterLayout() {
     // ── 1. Categories with subcategories ────────────────────────────────
     const categoriesQuery = Category.find({
       isActive: true,
@@ -93,30 +118,11 @@ export async function getLoyoutListController(
       trendingSubcategoriesQuery,
     ]);
 
-    res.status(200).json({
-      success: true,
-      data: {
-        categories,
-        trendingCategories,
-        topReviewedProducts,
-        trendingProducts,
-        trendingSubcategories,
-      },
-    });
-  } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : "Server error";
-
-    res.status(500).json({
-      success: false,
-      message: errorMessage,
-      data: {
-        categories: [],
-        trendingCategories: [],
-        topReviewedProducts: [],
-        trendingProducts: [],
-        trendingSubcategories: [],
-      },
-    });
-  }
+    return {
+      categories,
+      trendingCategories,
+      topReviewedProducts,
+      trendingProducts,
+      trendingSubcategories,
+    };
 }

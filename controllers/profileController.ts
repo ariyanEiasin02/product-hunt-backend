@@ -15,42 +15,27 @@ export const getUsernameProfileController = async (
     const { username } = req.params;
     const currentUserId = req.user?.id;
 
-    const user = await User.findOne({ username }).select("-password");
+    const user = await User.findOne({ username }).select("-password").lean();
     if (!user) {
       res.status(404).json({ success: false, message: "User not found" });
       return;
     }
 
-    // Count user's products (approved ones)
-    const productsCount = await Product.countDocuments({
-      makers: user._id,
-      status: "approved",
-    });
-
-    // Count upvoted products
-    const upvotesCount = await Product.countDocuments({
-      upvotedBy: user._id,
-    });
-
-    // Count reviews
-    const reviewsCount = await Review.countDocuments({ user: user._id });
-
-    // Count saved/collections
-    const collectionsCount = user.savedProducts?.length || 0;
-
     const isOwnProfile = currentUserId === user._id.toString();
 
-    // Check if current user is following this user
-    let isFollowing = false;
-    if (currentUserId && !isOwnProfile) {
-      const currentUser = await User.findById(currentUserId).select("following");
-      if (currentUser) {
-        isFollowing =
-          currentUser.following?.some(
-            (id) => id.toString() === user._id.toString()
-          ) || false;
-      }
-    }
+    // All four checks in parallel — no sequential round-trips.
+    const [productsCount, upvotesCount, reviewsCount, isFollowing] =
+      await Promise.all([
+        Product.countDocuments({ makers: user._id, status: "approved" }),
+        Product.countDocuments({ upvotedBy: user._id }),
+        Review.countDocuments({ user: user._id }),
+        currentUserId && !isOwnProfile
+          ? User.exists({ _id: currentUserId, following: user._id }).then(Boolean)
+          : Promise.resolve(false),
+      ]);
+
+    // Count saved/collections
+    const collectionsCount = (user as any).savedProducts?.length || 0;
 
     res.status(200).json({
       success: true,
@@ -183,25 +168,31 @@ export const getUserProfileReviewsController = async (
     const userId = user._id;
 
     const reviews = await Review.find({ user: userId })
-      .populate("product", "name slug tagline thumbnail upvotes commentsCount topics")
       .populate("user", "fullname email")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
 
-    // For each review, also populate product topics
-    const reviewsPopulated = await Promise.all(
-      reviews.map(async (review: any) => {
-        if (review.product) {
-          const product = await Product.findById(review.product._id)
-            .populate("topics", "name slug")
-            .select("name slug tagline thumbnail upvotes commentsCount topics")
-            .lean();
-          return { ...review, product };
-        }
-        return review;
-      })
+    // Batch-load all product topics in ONE query instead of one per review
+    // (this was an N+1: limit 10 reviews → 10 extra queries).
+    const productIds = reviews
+      .map((r: any) => r.product)
+      .filter((id: any) => id);
+    const products = productIds.length
+      ? await Product.find({ _id: { $in: productIds } })
+          .populate("topics", "name slug")
+          .select("name slug tagline thumbnail upvotes commentsCount topics")
+          .lean()
+      : [];
+    const productMap = new Map(
+      products.map((p: any) => [p._id.toString(), p])
+    );
+
+    const reviewsPopulated = reviews.map((review: any) =>
+      review.product
+        ? { ...review, product: productMap.get(review.product.toString()) || review.product }
+        : review
     );
 
     const total = await Review.countDocuments({ user: user._id });
