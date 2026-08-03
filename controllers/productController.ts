@@ -438,7 +438,7 @@ export async function getProductBySlugController(
     // lean() + omit the (potentially large) upvotedBy array from the wire.
     const product = await Product.findOne({ slug })
       .select("-upvotedBy")
-      .populate("makers", "fullname email avatar")
+      .populate("makers", "_id fullname email username profileImage")
       .populate("topics", "name slug icon description")
       .lean()
       .exec();
