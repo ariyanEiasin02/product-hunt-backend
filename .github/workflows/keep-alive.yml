@@ -1,0 +1,42 @@
+# Keep Render awake
+#
+# Render free instances sleep after 15 minutes without inbound traffic, and
+# visitors then see "This deployment is temporarily paused" while it cold-starts
+# (~1 min). This workflow pings the /health endpoint on a schedule so the
+# instance never sleeps.
+#
+# Note: GitHub Actions cron is NOT guaranteed to run more often than every
+# ~5 minutes (the shortest reliable interval). 5 min < Render's 15-min sleep
+# threshold, so this is enough. For a guaranteed 1-minute ping, use cron-job.org
+# (free) pointed at https://<your-service>.onrender.com/health — see README.
+
+name: Keep Render awake
+
+on:
+  schedule:
+    # Every 1 minute as requested. NOTE: GitHub may throttle scheduled runs
+    # to ~5-minute intervals in practice; for a guaranteed 1-minute ping use
+    # cron-job.org (free) pointed at https://<your-service>.onrender.com/health.
+    - cron: "*/1 * * * *"
+  workflow_dispatch: {} # allow manual trigger from the Actions tab
+
+jobs:
+  ping-health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        env:
+          # Set repo variable RENDER_APP_URL (Settings → Secrets and variables
+          # → Actions → Variables) to your Render URL if it differs from the
+          # default below.
+          RENDER_APP_URL: ${{ vars.RENDER_APP_URL }}
+        run: |
+          URL="${RENDER_APP_URL:-https://product-hunt-backend.onrender.com}/health"
+          echo "Pinging ${URL}"
+          # -s silent, -S show errors, -o /dev/null discard body,
+          # -w '%{http_code}' print status code, --max-time 30 so a hung
+          # instance never hangs the runner.
+          STATUS="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "${URL}" || echo unreachable)"
+          echo "HTTP ${STATUS}"
+          # Exit 0 regardless — a temporarily unreachable site is expected and
+          # should not spam GitHub failure notifications.
