@@ -14,8 +14,10 @@ name: Keep Render awake
 
 on:
   schedule:
-    # Every 5 minutes (GitHub's minimum practical interval).
-    - cron: "*/5 * * * *"
+    # Every 1 minute as requested. NOTE: GitHub may throttle scheduled runs
+    # to ~5-minute intervals in practice; for a guaranteed 1-minute ping use
+    # cron-job.org (free) pointed at https://<your-service>.onrender.com/health.
+    - cron: "*/1 * * * *"
   workflow_dispatch: {} # allow manual trigger from the Actions tab
 
 jobs:
