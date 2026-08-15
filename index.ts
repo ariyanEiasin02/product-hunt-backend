@@ -46,7 +46,8 @@ const ALLOWED_ORIGINS: string[] = process.env.ALLOWED_ORIGINS
       "http://127.0.0.1:3000",
       "https://product-hunt-admin.vercel.app",
       "https://product-hunt-frontend-blush.vercel.app",
-      "https://product-hunt-frontend.vercel.app",
+      "https://product-hunt-frontend.netlify.app",
+      "https://product-hunt-admin.netlify.app"
     ];
 
 const corsOptions = {
