@@ -32,12 +32,39 @@ const STATUS_TRANSITIONS: Record<ProductStatus, ProductStatus[]> = {
 };
 
 /**
+ * Parse an id list coming from form-data or a JSON body.
+ * Accepts real arrays, JSON-stringified arrays ("[\"id1\",\"id2\"]"),
+ * comma-separated strings ("id1,id2"), or a single id string.
+ */
+export function parseIdList(value: any): any {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string") return value; // undefined / null stay as-is
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map((id: any) => String(id).trim()).filter(Boolean);
+      }
+    } catch {
+      // Not valid JSON — fall through to comma-splitting
+    }
+  }
+  return trimmed.includes(",")
+    ? trimmed.split(",").map((id) => id.trim()).filter(Boolean)
+    : [trimmed];
+}
+
+/**
  * Helper: Resolve topic IDs (can be category or subcategory IDs) into subcategory IDs only.
  * - If an ID is a subcategory, it's used directly.
- * - If an ID is a category, all its approved subcategories are resolved.
+ * - If an ID is a category, all its approved subcategories are resolved — unless the
+ *   user also explicitly selected one of that category's subcategories, in which case
+ *   the specific selection wins and the category is not expanded.
  * Returns a deduplicated array of subcategory ObjectIds.
  */
-async function resolveTopicsToSubcategories(topicIds: string[]): Promise<mongoose.Types.ObjectId[]> {
+export async function resolveTopicsToSubcategories(topicIds: string[]): Promise<mongoose.Types.ObjectId[]> {
   // Track how many input IDs were successfully found (for warning)
   let foundCount = 0;
 
@@ -70,8 +97,19 @@ async function resolveTopicsToSubcategories(topicIds: string[]): Promise<mongoos
     foundCount += categories.length;
 
     for (const cat of categories) {
-      for (const sub of cat.subcategories || []) {
-        resolvedIds.add((sub as any)._id.toString());
+      const approvedSubs = (cat.subcategories || []) as any[];
+
+      // If the user explicitly selected one of this category's subcategories,
+      // honor that specific choice instead of expanding the whole category.
+      // Expanding here would assign every subcategory of the parent (and can
+      // exceed the 3-selection limit) even though the user narrowed it down.
+      const hasExplicitSub = approvedSubs.some((sub) =>
+        resolvedIds.has(sub._id.toString())
+      );
+      if (hasExplicitSub) continue;
+
+      for (const sub of approvedSubs) {
+        resolvedIds.add(sub._id.toString());
       }
     }
   }
@@ -113,13 +151,9 @@ export async function createProductController(
       };
     }
 
-    // Handle makers and topics - convert strings to arrays if needed
-    if (typeof makers === 'string') {
-      makers = makers.includes(',') ? makers.split(',').map(id => id.trim()) : [makers];
-    }
-    if (typeof topics === 'string') {
-      topics = topics.includes(',') ? topics.split(',').map(id => id.trim()) : [topics];
-    }
+    // Handle makers and topics - accept arrays, JSON strings, or comma-separated strings
+    makers = parseIdList(makers);
+    topics = parseIdList(topics);
 
     // Handle file uploads (thumbnail and gallery) — uploaded to Cloudinary
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
@@ -214,13 +248,7 @@ export async function createProductController(
       return;
     }
 
-    if (resolvedTopics.length > 3) {
-      res.status(400).json({
-        success: false,
-        message: "Maximum 3 categories allowed after resolving parent categories",
-      });
-      return;
-    }
+
 
     // Validate makers exist
     const validMakers = await User.find({ _id: { $in: makers } });
@@ -1201,16 +1229,33 @@ export async function updateProductController(
     }
 
     // Handle makers and topics - convert strings to arrays if needed
-    if (typeof makers === 'string') {
-      makers = makers.includes(',') ? makers.split(',').map(id => id.trim()) : [makers];
-    } else if (makers === undefined) {
+    makers = parseIdList(makers);
+    if (makers === undefined) {
       makers = product.makers; // Keep existing
     }
-    
-    if (typeof topics === 'string') {
-      topics = topics.includes(',') ? topics.split(',').map(id => id.trim()) : [topics];
-    } else if (topics === undefined) {
+
+    const topicsProvided = topics !== undefined;
+    topics = parseIdList(topics);
+    if (topics === undefined) {
       topics = product.topics; // Keep existing
+    }
+
+    // Enforce 1-3 topics on update too — reject clearing or exceeding the limit.
+    if (topicsProvided) {
+      if (!topics || !Array.isArray(topics) || topics.length === 0) {
+        res.status(400).json({
+          success: false,
+          message: "At least one category is required",
+        });
+        return;
+      }
+      if (topics.length > 3) {
+        res.status(400).json({
+          success: false,
+          message: "Maximum 3 categories allowed",
+        });
+        return;
+      }
     }
 
     // Handle file uploads (thumbnail and gallery) — uploaded to Cloudinary
@@ -1261,13 +1306,7 @@ export async function updateProductController(
     // Resolve topics: accept both category and subcategory IDs, store only subcategory IDs
     if (topics && Array.isArray(topics) && topics.length > 0) {
       const resolvedTopics = await resolveTopicsToSubcategories(topics);
-      if (resolvedTopics.length > 3) {
-        res.status(400).json({
-          success: false,
-          message: "Maximum 3 categories allowed after resolving parent categories",
-        });
-        return;
-      }
+
       product.topics = resolvedTopics;
     }
     if (pricingType !== undefined) product.pricingType = pricingType;
@@ -1370,13 +1409,9 @@ export async function createProductCloudinaryController(
       };
     }
 
-    // Handle makers and topics - convert strings to arrays if needed
-    if (typeof makers === 'string') {
-      makers = makers.includes(',') ? makers.split(',').map(id => id.trim()) : [makers];
-    }
-    if (typeof topics === 'string') {
-      topics = topics.includes(',') ? topics.split(',').map(id => id.trim()) : [topics];
-    }
+    // Handle makers and topics - accept arrays, JSON strings, or comma-separated strings
+    makers = parseIdList(makers);
+    topics = parseIdList(topics);
 
     // Handle file uploads (thumbnail and gallery) — Cloudinary
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
@@ -1472,13 +1507,7 @@ export async function createProductCloudinaryController(
       return;
     }
 
-    if (resolvedTopics.length > 3) {
-      res.status(400).json({
-        success: false,
-        message: "Maximum 3 categories allowed after resolving parent categories",
-      });
-      return;
-    }
+
 
     // Validate makers exist
     const validMakers = await User.find({ _id: { $in: makers } });
@@ -1589,16 +1618,33 @@ export async function updateProductCloudinaryController(
       links = { website: req.body['links.website'] };
     }
 
-    if (typeof makers === 'string') {
-      makers = makers.includes(',') ? makers.split(',').map(id => id.trim()) : [makers];
-    } else if (makers === undefined) {
+    makers = parseIdList(makers);
+    if (makers === undefined) {
       makers = product.makers;
     }
 
-    if (typeof topics === 'string') {
-      topics = topics.includes(',') ? topics.split(',').map(id => id.trim()) : [topics];
-    } else if (topics === undefined) {
+    const topicsProvided = topics !== undefined;
+    topics = parseIdList(topics);
+    if (topics === undefined) {
       topics = product.topics;
+    }
+
+    // Enforce 1-3 topics on update too — reject clearing or exceeding the limit.
+    if (topicsProvided) {
+      if (!topics || !Array.isArray(topics) || topics.length === 0) {
+        res.status(400).json({
+          success: false,
+          message: "At least one category is required",
+        });
+        return;
+      }
+      if (topics.length > 3) {
+        res.status(400).json({
+          success: false,
+          message: "Maximum 3 categories allowed",
+        });
+        return;
+      }
     }
 
     // Handle file uploads via Cloudinary
@@ -1653,13 +1699,7 @@ export async function updateProductCloudinaryController(
     // Resolve topics: accept both category and subcategory IDs, store only subcategory IDs
     if (topics && Array.isArray(topics) && topics.length > 0) {
       const resolvedTopics = await resolveTopicsToSubcategories(topics);
-      if (resolvedTopics.length > 3) {
-        res.status(400).json({
-          success: false,
-          message: "Maximum 3 categories allowed after resolving parent categories",
-        });
-        return;
-      }
+
       product.topics = resolvedTopics;
     }
     if (pricingType !== undefined) product.pricingType = pricingType;
