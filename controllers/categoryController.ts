@@ -231,24 +231,6 @@ export async function updateSubCategoryController(
     subcategory.name = name;
     subcategory.slug = slug;
     subcategory.description = description;
-
-    // Keep both categories' `subcategories` arrays in sync when the parent
-    // category changes — otherwise a subcategory lingers under its old
-    // category (stale arrays make a category show subcategories that don't
-    // belong to it).
-    const oldCategoryId = subcategory.category.toString();
-    if (category && category !== oldCategoryId) {
-      await Promise.all([
-        Category.updateOne(
-          { _id: oldCategoryId },
-          { $pull: { subcategories: subcategory._id } }
-        ),
-        Category.updateOne(
-          { _id: category },
-          { $addToSet: { subcategories: subcategory._id } }
-        ),
-      ]);
-    }
     subcategory.category = category;
     // Handle image upload to Cloudinary
     if (req.file) {
@@ -280,16 +262,9 @@ export async function getSubcategoriesController(
     const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? 20), 10) || 20));
     const skip  = (page - 1) * limit;
 
-    // Optional ?categoryId= filter — only subcategories of that category.
-    const categoryId = req.query.categoryId;
-    const categoryIdStr = typeof categoryId === "string" ? categoryId.trim() : "";
-    const hasValidFilter = !!categoryIdStr && mongoose.Types.ObjectId.isValid(categoryIdStr);
-    const filter: Record<string, unknown> = {};
-    if (hasValidFilter) filter.category = categoryIdStr;
-
     const [subcategories, total] = await Promise.all([
-      Subcategory.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
-      Subcategory.countDocuments(filter),
+      Subcategory.find({}).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      Subcategory.countDocuments({}),
     ]);
 
     res.status(200).json({
@@ -362,12 +337,6 @@ export async function subcategoryDeleteController(
       res.status(404).json({ success: false, message: "Subcategory not found" });
       return;
     }
-    // Remove the subcategory from its parent category's array too, so a
-    // deleted subcategory can't linger under a category.
-    await Category.updateOne(
-      { _id: subcategory.category },
-      { $pull: { subcategories: subcategory._id } }
-    );
     await Subcategory.findByIdAndDelete(id);
     cacheDelPrefix("category:");
     cacheDelPrefix("footer:");
