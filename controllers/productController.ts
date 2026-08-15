@@ -1234,9 +1234,28 @@ export async function updateProductController(
       makers = product.makers; // Keep existing
     }
 
+    const topicsProvided = topics !== undefined;
     topics = parseIdList(topics);
     if (topics === undefined) {
       topics = product.topics; // Keep existing
+    }
+
+    // Enforce 1-3 topics on update too — reject clearing or exceeding the limit.
+    if (topicsProvided) {
+      if (!topics || !Array.isArray(topics) || topics.length === 0) {
+        res.status(400).json({
+          success: false,
+          message: "At least one category is required",
+        });
+        return;
+      }
+      if (topics.length > 3) {
+        res.status(400).json({
+          success: false,
+          message: "Maximum 3 categories allowed",
+        });
+        return;
+      }
     }
 
     // Handle file uploads (thumbnail and gallery) — uploaded to Cloudinary
@@ -1604,9 +1623,28 @@ export async function updateProductCloudinaryController(
       makers = product.makers;
     }
 
+    const topicsProvided = topics !== undefined;
     topics = parseIdList(topics);
     if (topics === undefined) {
       topics = product.topics;
+    }
+
+    // Enforce 1-3 topics on update too — reject clearing or exceeding the limit.
+    if (topicsProvided) {
+      if (!topics || !Array.isArray(topics) || topics.length === 0) {
+        res.status(400).json({
+          success: false,
+          message: "At least one category is required",
+        });
+        return;
+      }
+      if (topics.length > 3) {
+        res.status(400).json({
+          success: false,
+          message: "Maximum 3 categories allowed",
+        });
+        return;
+      }
     }
 
     // Handle file uploads via Cloudinary
