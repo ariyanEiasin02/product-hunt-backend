@@ -1,4 +1,5 @@
 import e, { Request, Response } from "express";
+import mongoose from "mongoose";
 import Category from "../models/categorySchema.js";
 import Subcategory from "../models/subcategorySchema.js";
 import Product from "../models/productSchema.js";
@@ -684,14 +685,30 @@ export async function getCategoryBySlugController(
   }
 }
 
-// Get all approved subcategories (for product submission topic selection)
+// Get all approved subcategories (for product submission topic selection).
+// Optional ?categoryId= filter — when provided, only subcategories belonging
+// to that category are returned (used by the product-create form when the
+// user clicks a category).
 export async function getApprovedSubcategoriesController(
   req: Request,
   res: Response
 ): Promise<void> {
   try {
-    const subcategories = await getOrSet("category:approved-subcats", CATEGORY_CACHE_TTL, () =>
-      Subcategory.find({ status: "approved" })
+    const categoryId = req.query.categoryId;
+    const categoryIdStr = typeof categoryId === "string" ? categoryId.trim() : "";
+
+    // Validate the filter (if given) so an invalid id returns an empty list
+    // instead of a Mongo CastError.
+    const hasValidFilter = !!categoryIdStr && mongoose.Types.ObjectId.isValid(categoryIdStr);
+    const cacheKey = hasValidFilter
+      ? `category:approved-subcats:${categoryIdStr}`
+      : "category:approved-subcats";
+
+    const filter: Record<string, unknown> = { status: "approved" };
+    if (hasValidFilter) filter.category = categoryIdStr;
+
+    const subcategories = await getOrSet(cacheKey, CATEGORY_CACHE_TTL, () =>
+      Subcategory.find(filter)
         .select("name slug image")
         .populate("category", "name slug")
         .sort({ name: 1 })
@@ -710,21 +727,41 @@ export async function getApprovedSubcategoriesController(
   }
 }
 
-// Get categories and subcategories as a flat array for React Select dropdown
+// Get categories and subcategories as a flat array for React Select dropdown.
+// Optional ?categoryId= filter — when provided, only that category and its
+// subcategories are returned (used by the product-create form when the user
+// clicks a category).
 export async function getCategoriesAndSubcategoriesForSelectController(
   req: Request,
   res: Response
 ): Promise<void> {
   try {
+    const categoryId = req.query.categoryId;
+    const categoryIdStr = typeof categoryId === "string" ? categoryId.trim() : "";
+
+    // Validate the filter (if given) so an invalid id returns an empty list
+    // instead of a Mongo CastError.
+    const hasValidFilter = !!categoryIdStr && mongoose.Types.ObjectId.isValid(categoryIdStr);
+    const cacheKey = hasValidFilter
+      ? `category:select:${categoryIdStr}`
+      : "category:select";
+
+    const categoryFilter: Record<string, unknown> = { status: "approved" };
+    const subcategoryFilter: Record<string, unknown> = { status: "approved" };
+    if (hasValidFilter) {
+      categoryFilter._id = categoryIdStr;
+      subcategoryFilter.category = categoryIdStr;
+    }
+
     // Fetch approved categories and subcategories in parallel (cached — this
     // endpoint feeds a React-Select dropdown on every product submission page).
-    const [categories, subcategories] = await getOrSet("category:select", CATEGORY_CACHE_TTL, async () =>
+    const [categories, subcategories] = await getOrSet(cacheKey, CATEGORY_CACHE_TTL, async () =>
       Promise.all([
-        Category.find({ status: "approved" })
+        Category.find(categoryFilter)
           .select("_id name slug")
           .sort({ name: 1 })
           .lean(),
-        Subcategory.find({ status: "approved" })
+        Subcategory.find(subcategoryFilter)
           .select("_id name slug category")
           .populate("category", "_id name slug")
           .sort({ name: 1 })
